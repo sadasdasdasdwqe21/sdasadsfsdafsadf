@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground (Android 8+). Content kept inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:strokeColor="#FB8A4C" android:strokeWidth="3.5" android:strokeLineCap="round" android:pathData="M60,30 L60,78" />
+    <path android:strokeColor="#E6ECEF" android:strokeWidth="4.5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M28,74 L37,71 L44,66 L50,69 L55,59 L60,36 L65,61 L70,67 L76,65 L81,72" />
+</vector>

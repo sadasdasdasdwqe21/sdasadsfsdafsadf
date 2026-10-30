@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon for Android 7.x: dark tile, a spectrum trace, and an orange order line. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#11181E" android:pathData="M18,8h72a10,10 0,0 1,10 10v72a10,10 0,0 1,-10 10h-72a10,10 0,0 1,-10 -10v-72a10,10 0,0 1,10 -10z" />
+    <path android:strokeColor="#FB8A4C" android:strokeWidth="4" android:strokeLineCap="round" android:pathData="M62,24 L62,84" />
+    <path android:strokeColor="#E6ECEF" android:strokeWidth="5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M22,80 L34,76 L42,70 L50,74 L56,62 L62,32 L68,64 L74,72 L82,70 L88,78" />
+</vector>
