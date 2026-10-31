@@ -20,14 +20,21 @@ public final class Orders {
         public final double hz;
         public final String what;
         public final String check;
+        /** Main orders get a line on the chart; extra half and higher orders only label peaks. */
+        public final boolean drawLine;
 
         Source(String shortName, String name, Family family, double hz, String what, String check) {
+            this(shortName, name, family, hz, what, check, true);
+        }
+
+        Source(String shortName, String name, Family family, double hz, String what, String check, boolean drawLine) {
             this.shortName = shortName;
             this.name = name;
             this.family = family;
             this.hz = hz;
             this.what = what;
             this.check = check;
+            this.drawLine = drawLine;
         }
 
         /** Relative difference of a measured frequency from this source, e.g. 0.02 = +2%. */
@@ -65,8 +72,20 @@ public final class Orders {
                     "Normal 4-cylinder firing pulses are getting into the body instead of being absorbed.",
                     "Torque-converter lock-up at low rpm (lugging), mount quality, exhaust hangers and brackets, heat shields, intake pipe brackets."));
             list.add(new Source("4E", "Engine 4th order", Family.ENGINE, crank * 4,
-                    "A harmonic of the firing pulses. Usually heard as a boom or drone more than felt.",
-                    "Exhaust contact or missing hangers, loose heat shields, body panels resonating at that rpm."));
+                    "A harmonic of the firing pulses. Strong only when a part is resonating at this frequency.",
+                    "Tap-test the exhaust, intake pipe, heat shields and steering column. Also check for missing exhaust hangers or brackets."));
+            for (double k : new double[]{1.5, 2.5, 3.5, 4.5, 5.5}) {
+                list.add(new Source(orderLabel(k) + "E", "Engine " + orderLabel(k) + " order", Family.ENGINE, crank * k,
+                        "A half order. Cylinders aren't firing evenly, so the pattern only repeats every two crank turns.",
+                        "Roughness monitor under load, swap coils between cylinders, injector leak-down test, compression test.",
+                        false));
+            }
+            for (double k : new double[]{3, 5, 6, 7, 8, 9, 10, 11, 12}) {
+                list.add(new Source(orderLabel(k) + "E", "Engine " + orderLabel(k) + " order", Family.ENGINE, crank * k,
+                        "A harmonic of crank rotation. It is small on its own, so if it is the strongest peak a part is probably resonating at this frequency.",
+                        "Tap-test the exhaust, intake pipe, heat shields and steering column to find the part that rings at this frequency.",
+                        false));
+            }
         }
         double circ = tyreCircumferenceM(tyreSize);
         if (kmh > 0 && !Double.isNaN(circ)) {
@@ -96,12 +115,23 @@ public final class Orders {
         for (Source s : list) {
             if (s.hz <= 0) continue;
             double d = Math.abs(s.diff(measuredHz));
-            if (d <= tolerance && d < bestAbs) {
+            double t = s.drawLine ? tolerance : Math.min(tolerance, 0.03); // extra orders sit close together
+            if (d <= t && d < bestAbs) {
                 best = s;
                 bestAbs = d;
             }
         }
         return best;
+    }
+
+    /** "½", "1½", "1st", "2nd", "3rd", "4th"… */
+    public static String orderLabel(double k) {
+        if (k == 0.5) return "½";
+        if (k != Math.floor(k)) return (int) Math.floor(k) + "½";
+        int n = (int) k;
+        String suf = (n % 100 >= 11 && n % 100 <= 13) ? "th"
+                : n % 10 == 1 ? "st" : n % 10 == 2 ? "nd" : n % 10 == 3 ? "rd" : "th";
+        return n + suf;
     }
 
     /** Closest source regardless of tolerance, or null if the list is empty. */

@@ -64,7 +64,7 @@ public class SpectrumView extends View {
         this.peakHz = peakHz;
 
         double top = 60;
-        for (Orders.Source s : this.lines) if (s.family == Orders.Family.ENGINE && s.hz * 1.1 > top) top = s.hz * 1.1;
+        for (Orders.Source s : this.lines) if (s.drawLine && s.family == Orders.Family.ENGINE && s.hz * 1.1 > top) top = s.hz * 1.1;
         if (!Double.isNaN(peakHz)) top = Math.max(top, peakHz * 1.2);
         top = Math.min(top, 200);
         if (sp != null) top = Math.min(top, sp.fs / 2);
@@ -90,7 +90,7 @@ public class SpectrumView extends View {
 
         // Lay out order labels in rows so they don't overlap.
         List<Orders.Source> shown = new ArrayList<>();
-        for (Orders.Source s : lines) if (s.hz > 0 && s.hz <= fMax) shown.add(s);
+        for (Orders.Source s : lines) if (s.drawLine && s.hz > 0 && s.hz <= fMax) shown.add(s);
         Collections.sort(shown, (a, b) -> Double.compare(a.hz, b.hz));
         List<Float> rowEnds = new ArrayList<>();
         float[] labelX = new float[shown.size()];
@@ -112,9 +112,11 @@ public class SpectrumView extends View {
 
         // Grid and frequency axis.
         double step = fMax > 120 ? 20 : 10;
+        double labelStep = fMax / step > 8 ? step * 2 : step;
         for (double f = 0; f <= fMax + 1e-6; f += step) {
             float x = xOf(f, left, right);
             c.drawLine(x, top, x, bottom, grid);
+            if (Math.abs(f / labelStep - Math.round(f / labelStep)) > 1e-6) continue;
             String t = String.format(Locale.US, "%.0f", f);
             float tw = axisText.measureText(t);
             c.drawText(t, Math.max(left, Math.min(x - tw / 2, right - tw)), bottom + 14 * dp, axisText);

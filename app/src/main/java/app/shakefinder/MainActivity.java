@@ -21,6 +21,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -50,7 +51,7 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     private SensorManager sensorManager;
     private Sensor accel;
-    private boolean running = false, frozen = false;
+    private boolean running = false, frozen = false, tapMode = false;
     private Analysis.Spectrum lastSpectrum;
     private List<Analysis.Peak> lastPeaks = new ArrayList<>();
 
@@ -64,9 +65,11 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     private SharedPreferences prefs;
     private SpectrumView spectrumView;
-    private TextView status, chip, resultTitle, resultWhat, resultCheck, peaksText;
+    private TextView status, chip, resultTitle, resultWhat, resultCheck, peaksText, rpmLine, intro;
+    private LinearLayout altRow, inputsCard, legend;
     private EditText rpmIn, kmhIn, tyreIn, fdIn;
-    private Button startBtn, freezeBtn;
+    private CheckBox autoBox;
+    private Button startBtn, freezeBtn, engineModeBtn, tapModeBtn;
     private boolean loading = false;
 
     // ---------------------------------------------------------------- lifecycle
@@ -81,6 +84,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         getWindow().setNavigationBarColor(Theme.BG);
         setContentView(buildUi());
         loadInputs();
+        applyMode();
         refresh();
     }
 
@@ -134,6 +138,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     private void stopMeasuring() {
         if (!running) return;
         running = false;
+        frozen = false;
         if (sensorManager != null) sensorManager.unregisterListener(this);
         handler.removeCallbacks(tick);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -171,51 +176,113 @@ public class MainActivity extends Activity implements SensorEventListener {
         Analysis.Spectrum sp = Analysis.welch(st, sx, sy, sz, n);
         if (sp == null) { refresh(); return; }
         lastSpectrum = sp;
-        lastPeaks = Analysis.peaks(sp, 4, Math.min(sp.fs * 0.45, 200), 3);
+        lastPeaks = Analysis.peaks(sp, 4, Math.min(sp.fs * 0.45, 200), 12);
         refresh();
     }
 
     // ---------------------------------------------------------------- results
 
     private void refresh() {
-        double rpm = num(rpmIn), kmh = num(kmhIn), fd = num(fdIn);
-        List<Orders.Source> src = Orders.compute(rpm, kmh, tyreIn.getText().toString(), fd);
+        double typed = num(rpmIn), kmh = num(kmhIn), fd = num(fdIn);
+        double df = lastSpectrum != null ? lastSpectrum.df : 0.4;
+
+        AutoRpm.Result auto = null;
+        if (!tapMode && autoBox.isChecked() && !lastPeaks.isEmpty()) {
+            auto = AutoRpm.estimate(lastPeaks, typed, df);
+        }
+        double rpm = auto != null ? auto.rpm : typed;
+        List<Orders.Source> src = tapMode ? new ArrayList<>()
+                : Orders.compute(rpm, kmh, tyreIn.getText().toString(), fd);
         double peakHz = lastPeaks.isEmpty() ? Double.NaN : lastPeaks.get(0).hz;
         spectrumView.setData(lastSpectrum, src, peakHz);
 
-        // Status line.
+        updateStatus(rpm);
+        updateRpmLine(auto, typed);
+
+        if (lastPeaks.isEmpty()) {
+            showWaiting();
+            return;
+        }
+        if (tapMode) showTapResult();
+        else showEngineResult(src, rpm);
+    }
+
+    private void updateStatus(double rpm) {
         StringBuilder sb = new StringBuilder();
         if (!running) sb.append(lastSpectrum == null ? "Stopped" : "Stopped · last reading kept");
         else if (lastSpectrum == null) sb.append("Collecting the first few seconds…");
         else sb.append(String.format(Locale.US, "Measuring · %.0f samples/s · %.0f s window", lastSpectrum.fs, WINDOW_S));
         if (frozen) sb.append(" · frozen");
-        if (lastSpectrum != null) {
-            double needed = 0;
-            for (Orders.Source s : src) if (s.family == Orders.Family.ENGINE && s.shortName.equals("2E")) needed = s.hz;
-            if (needed > 0 && lastSpectrum.fs < needed * 2.2) {
+        if (lastSpectrum != null && !tapMode && rpm > 0) {
+            double secondOrder = rpm / 30.0;
+            if (lastSpectrum.fs < secondOrder * 2.2) {
                 sb.append(String.format(Locale.US,
                         "\nWarning: %.0f samples/s is too slow to see %.0f Hz. Results above %.0f Hz are not reliable.",
-                        lastSpectrum.fs, needed, lastSpectrum.fs / 2.2));
+                        lastSpectrum.fs, secondOrder, lastSpectrum.fs / 2.2));
             }
         }
         status.setText(sb.toString());
+    }
 
-        // Verdict.
-        if (lastPeaks.isEmpty()) {
-            chip.setText(running ? "LISTENING" : "NO READING YET");
-            chip.setTextColor(Theme.MUTED);
-            resultTitle.setText(running ? "Hold the engine steady" : "Press Start to measure");
-            resultWhat.setText("Lay the phone flat on the seat rail or centre console. Hold the rpm you typed below, under load if that's when it shakes.");
-            resultCheck.setText("");
-            peaksText.setText("");
+    private void updateRpmLine(AutoRpm.Result auto, double typed) {
+        altRow.removeAllViews();
+        if (tapMode) {
+            rpmLine.setVisibility(View.GONE);
+            altRow.setVisibility(View.GONE);
             return;
         }
+        rpmLine.setVisibility(View.VISIBLE);
+        if (auto != null) {
+            rpmLine.setText(String.format(Locale.US,
+                    "Engine speed measured from the peaks: %.0f rpm (you typed %.0f)", auto.rpm, typed));
+            rpmLine.setTextColor(Theme.OK);
+            for (final double alt : auto.others) {
+                Button b = button(String.format(Locale.US, "Tach showed about %.0f?", alt));
+                b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                b.setOnClickListener(v -> rpmIn.setText(String.format(Locale.US, "%.0f", alt)));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+                if (altRow.getChildCount() > 0) lp.leftMargin = dp(8);
+                altRow.addView(b, lp);
+            }
+            altRow.setVisibility(altRow.getChildCount() > 0 ? View.VISIBLE : View.GONE);
+        } else if (autoBox.isChecked() && !lastPeaks.isEmpty()) {
+            rpmLine.setText(String.format(Locale.US,
+                    "Couldn't read engine speed from the peaks. Using the %.0f rpm you typed.", typed));
+            rpmLine.setTextColor(Theme.WARN);
+            altRow.setVisibility(View.GONE);
+        } else if (!autoBox.isChecked()) {
+            rpmLine.setText(String.format(Locale.US, "Using the %.0f rpm you typed.", typed));
+            rpmLine.setTextColor(Theme.MUTED);
+            altRow.setVisibility(View.GONE);
+        } else {
+            rpmLine.setText("Engine speed will be measured from the peaks.");
+            rpmLine.setTextColor(Theme.MUTED);
+            altRow.setVisibility(View.GONE);
+        }
+    }
+
+    private void showWaiting() {
+        chip.setTextColor(Theme.MUTED);
+        resultCheck.setText("");
+        peaksText.setText("");
+        if (tapMode) {
+            chip.setText(running ? "LISTENING" : "TAP TEST");
+            resultTitle.setText(running ? "Tap the part now" : "Press Start, then tap the part");
+            resultWhat.setText("Engine off and exhaust cold. Tape the phone firmly to the part, press Start, tap the part sharply 3–4 times, then press Freeze.");
+        } else {
+            chip.setText(running ? "LISTENING" : "NO READING YET");
+            resultTitle.setText(running ? "Hold the engine steady" : "Press Start to measure");
+            resultWhat.setText("Lay the phone flat on the seat rail or centre console. Hold the rpm, under load if that's when it shakes.");
+        }
+    }
+
+    private void showEngineResult(List<Orders.Source> src, double rpm) {
         Analysis.Peak top = lastPeaks.get(0);
         Orders.Source best = Orders.bestMatch(src, top.hz, MATCH_TOL);
         if (best != null) {
             chip.setText(String.format(Locale.US, "MATCH · %s", pct(best.diff(top.hz))));
             chip.setTextColor(Theme.OK);
-            resultTitle.setText(best.name);
+            resultTitle.setText(String.format(Locale.US, "%s · %.1f Hz", best.name, top.hz));
             resultWhat.setText(best.what);
             resultCheck.setText("Check: " + best.check);
         } else {
@@ -226,14 +293,38 @@ public class MainActivity extends Activity implements SensorEventListener {
             resultWhat.setText(near == null ? "Type the engine speed so the app can compare."
                     : String.format(Locale.US, "Closest is %s at %.1f Hz (%s). A peak that stays put when rpm and speed change is usually a bracket, pipe or panel resonating on its own.",
                     near.name, near.hz, pct(near.diff(top.hz))));
-            resultCheck.setText("Make sure the rpm you typed is the rpm the engine is actually holding.");
+            resultCheck.setText("Use Tap test mode to find which part rings at this frequency.");
         }
 
         StringBuilder ps = new StringBuilder("Strongest peaks\n");
+        int shown = 0;
         for (Analysis.Peak p : lastPeaks) {
+            if (shown >= 5) break;
             Orders.Source m = Orders.bestMatch(src, p.hz, MATCH_TOL);
-            ps.append(String.format(Locale.US, "%6.1f Hz  %5.1f mg  %s\n", p.hz, p.amp / G * 1000,
-                    m == null ? "–" : m.name + " (" + pct(m.diff(p.hz)) + ")"));
+            ps.append(String.format(Locale.US, "%6.1f Hz %6.1f mg  %s\n", p.hz, p.amp / G * 1000,
+                    m == null ? "–" : m.name.replace("Engine ", "").replace(" order", "") + (m.family == Orders.Family.ENGINE ? " engine" : "")));
+            shown++;
+        }
+        peaksText.setText(ps.toString().trim());
+    }
+
+    private void showTapResult() {
+        Analysis.Peak top = lastPeaks.get(0);
+        chip.setText("TAP TEST");
+        chip.setTextColor(Theme.OK);
+        resultTitle.setText(String.format(Locale.US, "This part rings at %.1f Hz", top.hz));
+        resultWhat.setText(String.format(Locale.US,
+                "The engine's 2nd order reaches %.1f Hz at %.0f rpm, and its 4th order at %.0f rpm. "
+                        + "If either is where you feel the shake, this part is a prime suspect.",
+                top.hz, top.hz * 30, top.hz * 15));
+        resultCheck.setText("Test each suspect part the same way and compare. Only the part ringing near your shake frequency matters.");
+
+        StringBuilder ps = new StringBuilder("Strongest peaks\n");
+        int shown = 0;
+        for (Analysis.Peak p : lastPeaks) {
+            if (shown >= 4) break;
+            ps.append(String.format(Locale.US, "%6.1f Hz  2nd order at %4.0f rpm\n", p.hz, p.hz * 30));
+            shown++;
         }
         peaksText.setText(ps.toString().trim());
     }
@@ -258,6 +349,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         kmhIn.setText(prefs.getString("kmh", "0"));
         tyreIn.setText(prefs.getString("tyre", "225/55R18"));
         fdIn.setText(prefs.getString("fd", "3.700"));
+        autoBox.setChecked(prefs.getBoolean("auto", true));
+        tapMode = prefs.getBoolean("tap", false);
         loading = false;
     }
 
@@ -267,6 +360,8 @@ public class MainActivity extends Activity implements SensorEventListener {
                 .putString("kmh", kmhIn.getText().toString())
                 .putString("tyre", tyreIn.getText().toString())
                 .putString("fd", fdIn.getText().toString())
+                .putBoolean("auto", autoBox.isChecked())
+                .putBoolean("tap", tapMode)
                 .apply();
     }
 
@@ -283,6 +378,26 @@ public class MainActivity extends Activity implements SensorEventListener {
     private void bumpRpm(int delta) {
         double v = Math.max(0, num(rpmIn) + delta);
         rpmIn.setText(String.format(Locale.US, "%.0f", v));
+    }
+
+    private void setMode(boolean tap) {
+        if (tapMode == tap) return;
+        tapMode = tap;
+        saveInputs();
+        applyMode();
+        refresh();
+    }
+
+    private void applyMode() {
+        engineModeBtn.setBackgroundTintList(ColorStateList.valueOf(tapMode ? Theme.SURFACE : Theme.LINE));
+        engineModeBtn.setTextColor(tapMode ? Theme.MUTED : Theme.INK);
+        tapModeBtn.setBackgroundTintList(ColorStateList.valueOf(tapMode ? Theme.LINE : Theme.SURFACE));
+        tapModeBtn.setTextColor(tapMode ? Theme.INK : Theme.MUTED);
+        inputsCard.setVisibility(tapMode ? View.GONE : View.VISIBLE);
+        legend.setVisibility(tapMode ? View.GONE : View.VISIBLE);
+        intro.setText(tapMode
+                ? "Tap test: finds the frequency a part rings at. Engine off."
+                : "Measures the shake, then names the part that turns at that frequency.");
     }
 
     private void updateButtons() {
@@ -378,9 +493,24 @@ public class MainActivity extends Activity implements SensorEventListener {
         TextView title = text(26, Theme.INK, true);
         title.setText("Shake Finder");
         root.addView(title, gapBelow(2));
-        TextView sub = text(14, Theme.MUTED, false);
-        sub.setText("Measures the shake, then names the part that turns at that frequency.");
-        root.addView(sub, gapBelow(14));
+        intro = text(14, Theme.MUTED, false);
+        root.addView(intro, gapBelow(12));
+
+        // Mode switch.
+        LinearLayout modeRow = new LinearLayout(this);
+        modeRow.setOrientation(LinearLayout.HORIZONTAL);
+        engineModeBtn = button("Engine running");
+        tapModeBtn = button("Tap test");
+        engineModeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        tapModeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        LinearLayout.LayoutParams m1 = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        LinearLayout.LayoutParams m2 = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        m2.leftMargin = dp(8);
+        modeRow.addView(engineModeBtn, m1);
+        modeRow.addView(tapModeBtn, m2);
+        engineModeBtn.setOnClickListener(v -> setMode(false));
+        tapModeBtn.setOnClickListener(v -> setMode(true));
+        root.addView(modeRow, gapBelow(12));
 
         // Spectrum card.
         LinearLayout specCard = card();
@@ -390,7 +520,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         spectrumView = new SpectrumView(this);
         specCard.addView(spectrumView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(230)));
-        LinearLayout legend = new LinearLayout(this);
+        legend = new LinearLayout(this);
         legend.setOrientation(LinearLayout.HORIZONTAL);
         legend.setPadding(0, dp(8), 0, 0);
         String[] names = {"E engine", "P propshaft", "T tyre", "▲ your peak"};
@@ -425,6 +555,11 @@ public class MainActivity extends Activity implements SensorEventListener {
         res.addView(chip, gapBelow(4));
         resultTitle = text(22, Theme.INK, true);
         res.addView(resultTitle, gapBelow(6));
+        rpmLine = text(13, Theme.OK, false);
+        res.addView(rpmLine, gapBelow(6));
+        altRow = new LinearLayout(this);
+        altRow.setOrientation(LinearLayout.HORIZONTAL);
+        res.addView(altRow, gapBelow(8));
         resultWhat = text(15, Theme.INK, false);
         res.addView(resultWhat, gapBelow(6));
         resultCheck = text(14, Theme.MUTED, false);
@@ -435,11 +570,11 @@ public class MainActivity extends Activity implements SensorEventListener {
         root.addView(res, gapBelow(12));
 
         // Inputs card.
-        LinearLayout in = card();
+        inputsCard = card();
         TextView inTitle = text(13, Theme.MUTED, true);
         inTitle.setText("WHAT THE CAR IS DOING");
         inTitle.setLetterSpacing(0.08f);
-        in.addView(inTitle, gapBelow(8));
+        inputsCard.addView(inTitle, gapBelow(8));
 
         rpmIn = field(InputType.TYPE_CLASS_NUMBER);
         rpmIn.setGravity(Gravity.CENTER);
@@ -453,17 +588,25 @@ public class MainActivity extends Activity implements SensorEventListener {
         rpmRow.addView(minus, new LinearLayout.LayoutParams(dp(84), dp(48)));
         rpmRow.addView(rpmIn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         rpmRow.addView(plus, new LinearLayout.LayoutParams(dp(84), dp(48)));
-        in.addView(labelled("Engine speed (rpm)", rpmRow, "Engine lines move with this number"), gapBelow(12));
+        inputsCard.addView(labelled("Rough engine speed from the tach (rpm)", rpmRow,
+                "Within about 30% is enough. The app measures the exact value."), gapBelow(8));
+
+        autoBox = new CheckBox(this);
+        autoBox.setText("Measure exact rpm from the peaks");
+        autoBox.setTextColor(Theme.INK);
+        autoBox.setButtonTintList(ColorStateList.valueOf(Theme.ENGINE));
+        autoBox.setOnCheckedChangeListener((b, checked) -> { if (!loading) { saveInputs(); refresh(); } });
+        inputsCard.addView(autoBox, gapBelow(12));
 
         kmhIn = field(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        in.addView(labelled("Road speed (km/h)", kmhIn, "0 when parked in D or R"), gapBelow(12));
+        inputsCard.addView(labelled("Road speed (km/h)", kmhIn, "0 when parked in P, D or R"), gapBelow(12));
 
         tyreIn = field(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        in.addView(labelled("Tyre size", tyreIn, "Printed on the tyre sidewall, e.g. 225/55R18"), gapBelow(12));
+        inputsCard.addView(labelled("Tyre size", tyreIn, "Printed on the tyre sidewall, e.g. 225/55R18"), gapBelow(12));
 
         fdIn = field(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        in.addView(labelled("Final drive ratio", fdIn, "Confirm from the service manual or ID plate"));
-        root.addView(in, gapBelow(12));
+        inputsCard.addView(labelled("Final drive ratio", fdIn, "Confirm from the service manual or ID plate"));
+        root.addView(inputsCard, gapBelow(12));
 
         TextView tip = text(13, Theme.MUTED, false);
         tip.setText("Tip: if two parts match at once, keep the same rpm at a different road speed. Engine lines stay put; tyre and propshaft lines move.");
