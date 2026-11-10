@@ -1,0 +1,46 @@
+name: Build APK
+
+on:
+  push:
+    branches: [site-camera]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Run logic tests
+        run: sh tests/run.sh
+
+      - name: Build debug APK
+        run: |
+          echo "Using preinstalled Android SDK at $ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk SiteStamp.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SiteStamp-apk
+          path: SiteStamp.apk
+
+      - name: Publish as a release download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sitestamp-${{ github.run_number }}
+          name: SiteStamp build ${{ github.run_number }}
+          body: Download SiteStamp.apk below and open it on your phone to install.
+          files: SiteStamp.apk
