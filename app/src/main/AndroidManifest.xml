@@ -4,9 +4,24 @@
     <!-- Lets Android 12+ deliver the accelerometer above 200 samples/s. No prompt. -->
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
 
+    <!-- Road speed from GPS. Asked for the first time the app opens with GPS speed on. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Engine sound. Asked for only when "Use engine sound" is switched on. Nothing is saved. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- OBD2 adapter over classic Bluetooth. Asked for only when an adapter is chosen. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <uses-feature
         android:name="android.hardware.sensor.accelerometer"
         android:required="true" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
     <application
         android:allowBackup="true"

@@ -1,76 +1,139 @@
 package app.shakefinder;
 
+import android.Manifest;
+import android.animation.LayoutTransition;
+import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
+import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.res.ColorStateList;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.location.GnssStatus;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
-import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
-public class MainActivity extends Activity implements SensorEventListener {
+public class MainActivity extends Activity
+        implements SensorEventListener, LocationListener, ObdLink.Listener, ObdPage.Host {
 
-    private static final int CAP = 16384;          // ring buffer: ~30 s at 500 Hz
-    private static final double WINDOW_S = 4.0;    // seconds analysed each update
-    private static final long UPDATE_MS = 500;
-    private static final double MATCH_TOL = 0.06;  // ±6%
+    private static final int CAP = 16384;            // ring buffer: ~30 s at 500 Hz
+    private static final double SLOW_WIN = 5.2;      // seconds behind the chart and the verdict
+    private static final double FAST_WIN = 2.0;      // seconds behind the rpm reading
+    private static final double SLOW_SEG = 2.5, FAST_SEG = 1.1;
+    private static final double TAP_WIN = 4.0;
+    private static final long UPDATE_MS = 250;
     private static final double G = 9.80665;
+    private static final int PAGE_SHAKE = 0, PAGE_TAP = 1, PAGE_OBD = 2;
+    private static final int REQ_LOCATION = 1, REQ_MIC = 2, REQ_BT = 3;
+
+    private enum RpmSrc { NONE, VIB, VIB_SOUND, SOUND, LOCKED, OBD, ENGINE_OFF, TYPED }
+    private enum SpeedSrc { NONE, GPS, OBD, TYPED }
 
     // Sensor ring buffer (written on the sensor thread, read on the UI thread).
     private final Object lock = new Object();
     private final long[] tBuf = new long[CAP];
     private final float[] xBuf = new float[CAP], yBuf = new float[CAP], zBuf = new float[CAP];
     private int head = 0, count = 0;
-
-    // Snapshot arrays reused for each analysis.
     private final long[] st = new long[CAP];
     private final float[] sx = new float[CAP], sy = new float[CAP], sz = new float[CAP];
 
     private SensorManager sensorManager;
     private Sensor accel;
-    private boolean running = false, frozen = false, tapMode = false;
-    private Analysis.Spectrum lastSpectrum;
-    private List<Analysis.Peak> lastPeaks = new ArrayList<>();
+    private HandlerThread sensorThread;
+    private Handler sensorHandler;
+    private LocationManager locationManager;
+    private boolean gpsListening = false;
+    private int satsUsed = -1, satsSeen = -1;
+    private GnssStatus.Callback gnssCallback;
+
+    private final SpeedFilter gpsSpeed = new SpeedFilter();
+    private final TimeSeries obdRpm = new TimeSeries(128), obdSpeed = new TimeSeries(64), obdLoad = new TimeSeries(16);
+    private final RpmTracker vibTracker = new RpmTracker(RpmTracker.Kind.VIBRATION);
+    private final RpmTracker soundTracker = new RpmTracker(RpmTracker.Kind.SOUND);
+    private final SoundCapture mic = new SoundCapture();
+    private ObdLink link;
+    private BluetoothAdapter btAdapter;
+    private int pendingBtAction = 0; // 1 = choose, 2 = connect
+
+    // What the last analysis found.
+    private boolean running = false, frozen = false;
+    private Analysis.Spectrum slow;
+    private List<Analysis.Peak> slowPeaks = new ArrayList<>();
+    private SoundRpm.Sound sound;
+    private List<Analysis.Peak> soundPeaks = new ArrayList<>();
+    private double rpmValue = Double.NaN, rpmGauge = Double.NaN, rpmConf = 0, rpmGoodT = -1e9;
+    private RpmSrc rpmSrc = RpmSrc.NONE;
+    private boolean rpmHolding = false, rpmMoving = false, rpmFallback = false;
+    private RpmTracker.Estimate lastEst;
+    private double kmhValue = Double.NaN;
+    private SpeedSrc speedSrc = SpeedSrc.NONE;
+    private double selectedHz = Double.NaN;
+    private String chipSignature = "";
+    private String verdictSignature = "";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             if (running && !frozen) analyze();
-            if (running) handler.postDelayed(this, UPDATE_MS);
+            else liveSources();
+            handler.postDelayed(this, running ? UPDATE_MS : 500);
         }
     };
 
+    // Views.
     private SharedPreferences prefs;
+    private int page = PAGE_SHAKE;
+    private int measurePage = PAGE_SHAKE; // which of Engine / Tap test the current data belongs to
+    private final android.graphics.drawable.GradientDrawable liveDotBg = new android.graphics.drawable.GradientDrawable();
+    private boolean showSound = false, loading = false;
+    private ScrollView scroll;
+    private LinearLayout shakePage, gaugeRow, chipRow, setupBody, legend, inputsCard, peaksCard;
+    private ObdPage obdPage;
+    private SegmentView pageSwitch, sourceSwitch;
+    private GaugeView rpmGaugeView, speedGaugeView;
     private SpectrumView spectrumView;
-    private TextView status, chip, resultTitle, resultWhat, resultCheck, peaksText, rpmLine, intro;
-    private LinearLayout altRow, inputsCard, legend;
+    private PeakListView peakList;
+    private LevelMeterView levelMeter;
+    private TextView intro, status, chip, resultTitle, resultWhat, resultCheck, resultNote, startBtn, freezeBtn, setupHeader, peaksCaption;
+    private View liveDot;
+    private ObjectAnimator dotPulse, startPulse;
     private EditText rpmIn, kmhIn, tyreIn, fdIn;
-    private CheckBox autoBox;
-    private Button startBtn, freezeBtn, engineModeBtn, tapModeBtn;
-    private boolean loading = false;
+    private Switch autoBox, gpsBox, micBox, obdBox;
+    private View kmhRow;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -80,27 +143,57 @@ public class MainActivity extends Activity implements SensorEventListener {
         prefs = getSharedPreferences("shake", MODE_PRIVATE);
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         accel = sensorManager != null ? sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) : null;
+        locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+        BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+        btAdapter = bm != null ? bm.getAdapter() : null;
+        if (btAdapter != null) link = new ObdLink(btAdapter, this);
+        sensorThread = new HandlerThread("accel");
+        sensorThread.start();
+        sensorHandler = new Handler(sensorThread.getLooper());
         getWindow().setStatusBarColor(Theme.BG);
         getWindow().setNavigationBarColor(Theme.BG);
         setContentView(buildUi());
         loadInputs();
-        applyMode();
+        applyPage(false);
         refresh();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        startGpsIfWanted(true);
+        if (prefs.getBoolean("obd", false)) connectObd(false);
+        handler.removeCallbacks(tick);
+        handler.postDelayed(tick, 300);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         stopMeasuring();
+        stopGps();
+        if (link != null) link.stop();
+        handler.removeCallbacks(tick);
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacksAndMessages(null);
+        mic.stop();
+        if (obdPage != null) obdPage.stop();
+        if (sensorThread != null) sensorThread.quitSafely();
     }
 
-    // ---------------------------------------------------------------- sensor
+    private static double nowSec() {
+        return SystemClock.elapsedRealtimeNanos() / 1e9;
+    }
+
+    private boolean granted(String permission) {
+        return checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    // ---------------------------------------------------------------- accelerometer
 
     @Override
     public void onSensorChanged(SensorEvent e) {
@@ -123,11 +216,19 @@ public class MainActivity extends Activity implements SensorEventListener {
             return;
         }
         synchronized (lock) { head = 0; count = 0; }
-        lastSpectrum = null;
-        lastPeaks = new ArrayList<>();
+        slow = null;
+        slowPeaks = new ArrayList<>();
+        sound = null;
+        soundPeaks = new ArrayList<>();
+        lastEst = null;
+        selectedHz = Double.NaN;
+        vibTracker.reset();
+        soundTracker.reset();
+        if (rpmSrc != RpmSrc.OBD) { rpmValue = Double.NaN; rpmGauge = Double.NaN; rpmSrc = RpmSrc.NONE; }
         frozen = false;
-        sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_FASTEST);
+        sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_FASTEST, sensorHandler);
         running = true;
+        if (measurePage == PAGE_SHAKE && micBox.isChecked() && granted(Manifest.permission.RECORD_AUDIO)) mic.start(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         handler.removeCallbacks(tick);
         handler.postDelayed(tick, UPDATE_MS);
@@ -140,19 +241,18 @@ public class MainActivity extends Activity implements SensorEventListener {
         running = false;
         frozen = false;
         if (sensorManager != null) sensorManager.unregisterListener(this);
-        handler.removeCallbacks(tick);
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        mic.stop();
+        if (page != PAGE_OBD) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         updateButtons();
         refresh();
     }
 
-    /** Copies the last WINDOW_S seconds of samples, oldest first. */
-    private int snapshot() {
+    /** Copies the last windowS seconds of samples into st/sx/sy/sz, oldest first. */
+    private int snapshot(double windowS) {
         synchronized (lock) {
             if (count < 2) return 0;
             int newest = (head - 1 + CAP) % CAP;
-            long tEnd = tBuf[newest];
-            long tStart = tEnd - (long) (WINDOW_S * 1e9);
+            long tStart = tBuf[newest] - (long) (windowS * 1e9);
             int n = 0;
             int idx = newest;
             while (n < count && tBuf[idx] >= tStart) {
@@ -171,162 +271,570 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
     }
 
+    private static double top(Analysis.Spectrum sp) {
+        return Math.min(sp.fs * 0.45, 200);
+    }
+
+    // ---------------------------------------------------------------- analysis
+
     private void analyze() {
-        int n = snapshot();
-        Analysis.Spectrum sp = Analysis.welch(st, sx, sy, sz, n);
-        if (sp == null) { refresh(); return; }
-        lastSpectrum = sp;
-        lastPeaks = Analysis.peaks(sp, 4, Math.min(sp.fs * 0.45, 200), 12);
+        double now = nowSec();
+        if (measurePage == PAGE_TAP) {
+            Analysis.Spectrum sp = Analysis.welch(st, sx, sy, sz, snapshot(TAP_WIN), SLOW_SEG);
+            if (sp != null) {
+                slow = sp;
+                slowPeaks = Analysis.peaks(sp, 4, top(sp), 8, 0.006);
+            }
+            refresh();
+            return;
+        }
+        Analysis.Spectrum fast = Analysis.welch(st, sx, sy, sz, snapshot(FAST_WIN), FAST_SEG);
+        List<Analysis.Peak> fastPeaks = fast == null ? new ArrayList<>() : Analysis.peaks(fast, 4, top(fast), 14, 0.006);
+        Analysis.Spectrum sp = Analysis.welch(st, sx, sy, sz, snapshot(SLOW_WIN), SLOW_SEG);
+        if (sp != null) {
+            slow = sp;
+            slowPeaks = Analysis.peaks(sp, 4, top(sp), 14, 0.006);
+        }
+        SoundRpm dsp = mic.dsp();
+        if (mic.isRunning() && dsp != null) {
+            sound = dsp.analyze();
+            soundPeaks = SoundRpm.peaks(sound, 16);
+        } else if (!mic.isRunning()) {
+            sound = null;
+            soundPeaks = new ArrayList<>();
+        }
+        updateSpeed(now);
+        updateRpm(now, fast, fastPeaks);
         refresh();
+    }
+
+    /** Between measurements the gauges still follow GPS and OBD. */
+    private void liveSources() {
+        double now = nowSec();
+        updateSpeed(now);
+        if (measurePage != PAGE_TAP && !frozen) {
+            double o = obdRpm.latest(now, 1.5);
+            if (!Double.isNaN(o)) {
+                rpmSrc = o > 300 ? RpmSrc.OBD : RpmSrc.ENGINE_OFF;
+                rpmGauge = o > 300 ? o : Double.NaN;
+                if (!running) rpmValue = rpmGauge;
+            } else if (rpmSrc == RpmSrc.OBD || rpmSrc == RpmSrc.ENGINE_OFF) {
+                rpmSrc = RpmSrc.NONE;
+                rpmGauge = Double.NaN;
+                if (!running) rpmValue = Double.NaN;
+            }
+        }
+        updateGauges(now);
+    }
+
+    private void updateSpeed(double now) {
+        boolean gpsOn = gpsBox.isChecked() && granted(Manifest.permission.ACCESS_FINE_LOCATION);
+        double g = gpsOn ? gpsSpeed.meanKmh(now, SLOW_WIN) : Double.NaN;
+        double o = obdSpeed.ageSec(now) < 3 ? obdSpeed.mean(now, SLOW_WIN) : Double.NaN;
+        if (!Double.isNaN(g)) {
+            kmhValue = g;
+            speedSrc = SpeedSrc.GPS;
+        } else if (!Double.isNaN(o)) {
+            kmhValue = o;
+            speedSrc = SpeedSrc.OBD;
+        } else if (!gpsBox.isChecked()) {
+            kmhValue = num(kmhIn);
+            speedSrc = SpeedSrc.TYPED;
+        } else {
+            kmhValue = Double.NaN;
+            speedSrc = SpeedSrc.NONE;
+        }
+    }
+
+    private void updateRpm(double now, Analysis.Spectrum fast, List<Analysis.Peak> fastPeaks) {
+        lastEst = null;
+        rpmHolding = false;
+        rpmFallback = false;
+        rpmMoving = fast != null && !Double.isNaN(fast.drift) && fast.drift > 0.04;
+        double df = slow != null ? slow.df : 0.4;
+
+        // 1. The engine computer knows best.
+        if (obdRpm.ageSec(now) < 1.5) {
+            double mean = obdRpm.mean(now, SLOW_WIN);
+            double latest = obdRpm.latest(now, 1.5);
+            if (latest > 300) {
+                rpmValue = slow != null ? RpmTracker.refine(mean, slowPeaks, df) : mean;
+                rpmGauge = latest;
+                rpmSrc = RpmSrc.OBD;
+                rpmConf = 1;
+                rpmGoodT = now;
+                rpmMoving = obdRpm.spread(now, SLOW_WIN) > 0.04 * mean;
+            } else {
+                rpmValue = Double.NaN;
+                rpmGauge = Double.NaN;
+                rpmSrc = RpmSrc.ENGINE_OFF;
+            }
+            return;
+        }
+
+        // 2. Typed only.
+        if (!autoBox.isChecked()) {
+            double t = num(rpmIn);
+            rpmValue = t > 0 ? t : Double.NaN;
+            rpmGauge = rpmValue;
+            rpmSrc = t > 0 ? RpmSrc.TYPED : RpmSrc.NONE;
+            return;
+        }
+
+        // 3. Measure it: engine sound and vibration, each backing the other up.
+        double[] exclude = kmhValue > 0
+                ? Orders.roadFrequencies(kmhValue, tyreIn.getText().toString(), num(fdIn)) : null;
+        double exTol = speedSrc == SpeedSrc.GPS ? 0.035 : 0.07;
+        RpmTracker.Estimate se = null;
+        if (sound != null && !soundPeaks.isEmpty()) {
+            se = soundTracker.update(soundPeaks, sound.df, null, 0, now, null);
+        }
+        RpmTracker.Estimate ve = null;
+        if (fast != null && !rpmMoving) {
+            double[][] support = null;
+            if (se != null) {
+                support = new double[1 + se.alternatives.size()][];
+                support[0] = new double[]{se.rpm, Math.max(0.3, se.confidence)};
+                for (int i = 0; i < se.alternatives.size(); i++) support[i + 1] = new double[]{se.alternatives.get(i), 0.2};
+            }
+            ve = vibTracker.update(fastPeaks, fast.df, exclude, exTol, now, support);
+        }
+        boolean steady = slow != null && (Double.isNaN(slow.drift) || slow.drift < 0.02);
+        if (ve != null) {
+            rpmValue = steady ? RpmTracker.refine(ve.rpm, slowPeaks, df) : ve.rpm;
+            boolean agree = se != null && Math.abs(Math.log(se.rpm / ve.rpm)) < 0.025;
+            rpmSrc = ve.locked ? RpmSrc.LOCKED : agree ? RpmSrc.VIB_SOUND : RpmSrc.VIB;
+            rpmConf = agree ? Math.max(ve.confidence, 0.9) : ve.confidence;
+            lastEst = agree && !ve.locked ? null : ve; // agreement settles it: no "other reading" chips
+            rpmGoodT = now;
+        } else if (se != null && se.confidence >= 0.5 && se.matched >= 3 && !rpmMoving) {
+            rpmValue = steady ? RpmTracker.refine(se.rpm, slowPeaks, df) : se.rpm;
+            rpmSrc = se.locked ? RpmSrc.LOCKED : RpmSrc.SOUND;
+            rpmConf = se.confidence;
+            lastEst = se;
+            rpmGoodT = now;
+        } else if (!Double.isNaN(rpmValue) && now - rpmGoodT < 1.5
+                && rpmSrc != RpmSrc.TYPED && rpmSrc != RpmSrc.NONE && rpmSrc != RpmSrc.ENGINE_OFF) {
+            rpmHolding = true; // ride through a short gap
+        } else {
+            double t = num(rpmIn);
+            rpmValue = t > 0 ? t : Double.NaN;
+            rpmSrc = t > 0 ? RpmSrc.TYPED : RpmSrc.NONE;
+            rpmFallback = t > 0;
+        }
+        rpmGauge = rpmValue;
     }
 
     // ---------------------------------------------------------------- results
 
     private void refresh() {
-        double typed = num(rpmIn), kmh = num(kmhIn), fd = num(fdIn);
-        double df = lastSpectrum != null ? lastSpectrum.df : 0.4;
+        if (spectrumView == null) return;
+        double now = nowSec();
+        boolean tap = measurePage == PAGE_TAP;
+        boolean soundView = !tap && showSound && micBox.isChecked();
+        double df = slow != null ? slow.df : 0.4;
 
-        AutoRpm.Result auto = null;
-        if (!tapMode && autoBox.isChecked() && !lastPeaks.isEmpty()) {
-            auto = AutoRpm.estimate(lastPeaks, typed, df);
+        boolean rpmMeasured = rpmSrc != RpmSrc.TYPED && rpmSrc != RpmSrc.NONE;
+        double engTol = rpmMeasured ? 0.015 : 0.06;
+        double roadTol = speedSrc == SpeedSrc.GPS ? 0.035 : speedSrc == SpeedSrc.OBD ? 0.05 : 0.07;
+        List<Orders.Source> src = tap ? new ArrayList<>()
+                : Orders.compute(Double.isNaN(rpmValue) ? 0 : rpmValue, Double.isNaN(kmhValue) ? 0 : kmhValue,
+                tyreIn.getText().toString(), num(fdIn), engTol, roadTol);
+
+        // The peaks on show, and the one the verdict talks about.
+        List<Analysis.Peak> peaks = soundView ? soundPeaks : slowPeaks;
+        double plotDf = soundView && sound != null ? sound.df : df;
+        Analysis.Peak subject = null;
+        if (!peaks.isEmpty()) {
+            subject = peaks.get(0);
+            if (!Double.isNaN(selectedHz)) {
+                double best = Math.max(1.0, selectedHz * 0.025);
+                for (Analysis.Peak p : peaks) {
+                    if (Math.abs(p.hz - selectedHz) < best) { best = Math.abs(p.hz - selectedHz); subject = p; }
+                }
+            }
         }
-        double rpm = auto != null ? auto.rpm : typed;
-        List<Orders.Source> src = tapMode ? new ArrayList<>()
-                : Orders.compute(rpm, kmh, tyreIn.getText().toString(), fd);
-        double peakHz = lastPeaks.isEmpty() ? Double.NaN : lastPeaks.get(0).hz;
-        spectrumView.setData(lastSpectrum, src, peakHz);
 
-        updateStatus(rpm);
-        updateRpmLine(auto, typed);
+        drawChart(soundView, src, peaks, subject, plotDf);
+        updateStatus();
+        updateGauges(now);
+        updateChips(now);
 
-        if (lastPeaks.isEmpty()) {
-            showWaiting();
-            return;
-        }
-        if (tapMode) showTapResult();
-        else showEngineResult(src, rpm);
+        if (subject == null) showWaiting(tap, soundView);
+        else if (tap) showTapResult(subject);
+        else if (soundView) showSoundResult(src, subject);
+        else showEngineResult(src, subject, df);
+        updatePeakList(soundView, tap, src, peaks, subject, plotDf);
     }
 
-    private void updateStatus(double rpm) {
+    private void drawChart(boolean soundView, List<Orders.Source> src, List<Analysis.Peak> peaks,
+                           Analysis.Peak subject, double plotDf) {
+        List<SpectrumView.Mark> marks = new ArrayList<>();
+        double selHz = subject == null ? Double.NaN : subject.hz;
+        boolean live = running && !frozen;
+        if (soundView) {
+            if (sound == null) {
+                String hint = !granted(Manifest.permission.RECORD_AUDIO) ? "Microphone permission is needed"
+                        : running ? "Listening…" : "Press Start to hear the engine";
+                spectrumView.setPlot(0, null, 0, true, "dB", Theme.SPEED, 400, src, marks, Double.NaN, live, hint);
+                return;
+            }
+            int n = Math.min(sound.amp.length, (int) Math.ceil(SoundRpm.F_HI / sound.df) + 1);
+            double[] db = new double[n];
+            for (int k = 0; k < n; k++) db[k] = sound.db(k);
+            for (int i = 0; i < Math.min(8, peaks.size()); i++) {
+                Analysis.Peak p = peaks.get(i);
+                Orders.Source m = Orders.bestMatch(src, p.hz, plotDf);
+                marks.add(new SpectrumView.Mark(p.hz, peakDb(p), m == null ? Theme.INK : Theme.familyColor(m.family)));
+            }
+            double fTop = Double.isNaN(rpmValue) ? 400 : Math.max(240, Math.min(SoundRpm.F_HI, rpmValue / 60 * 8.8));
+            if (subject != null) fTop = Math.max(fTop, Math.min(SoundRpm.F_HI, subject.hz * 1.2));
+            fTop = Math.ceil(fTop / 100) * 100;
+            spectrumView.setPlot(sound.df, db, n, true, "dB", Theme.SPEED, fTop, src, marks, selHz, live, "");
+            return;
+        }
+        if (slow == null) {
+            String hint = measurePage == PAGE_TAP ? (running ? "Tap the part now" : "Press Start, then tap the part")
+                    : running ? "Collecting the first seconds…" : "Press Start to measure";
+            spectrumView.setPlot(0, null, 0, false, "mg", Theme.INK, 100, src, marks, Double.NaN, live, hint);
+            return;
+        }
+        double[] mg = new double[slow.amp.length];
+        for (int k = 0; k < mg.length; k++) mg[k] = slow.amp[k] / G * 1000;
+        for (int i = 0; i < Math.min(8, peaks.size()); i++) {
+            Analysis.Peak p = peaks.get(i);
+            Orders.Source m = Orders.bestMatch(src, p.hz, plotDf);
+            marks.add(new SpectrumView.Mark(p.hz, p.amp / G * 1000, m == null ? Theme.INK : Theme.familyColor(m.family)));
+        }
+        double topF = 60;
+        for (Orders.Source s : src) if (s.drawLine && s.family == Orders.Family.ENGINE && s.hz * 1.1 > topF) topF = s.hz * 1.1;
+        if (subject != null) topF = Math.max(topF, subject.hz * 1.2);
+        if (!peaks.isEmpty()) topF = Math.max(topF, peaks.get(0).hz * 1.2);
+        topF = Math.min(topF, Math.min(200, slow.fs / 2));
+        double step = topF > 120 ? 40 : 20;
+        topF = Math.min(Math.max(step, Math.ceil(topF / step) * step), slow.fs / 2);
+        spectrumView.setPlot(slow.df, mg, mg.length, false, "mg", Theme.INK, topF, src, marks, selHz, live, "");
+    }
+
+    /** A sound peak's level in dBFS: the background around it plus how far it stands out. */
+    private double peakDb(Analysis.Peak p) {
+        if (sound == null) return -99;
+        int k = Math.max(0, Math.min(sound.floor.length - 1, (int) Math.round(p.hz / sound.df)));
+        return 20 * Math.log10(Math.max(sound.floor[k] * p.amp, 1e-9));
+    }
+
+    private void updateStatus() {
         StringBuilder sb = new StringBuilder();
-        if (!running) sb.append(lastSpectrum == null ? "Stopped" : "Stopped · last reading kept");
-        else if (lastSpectrum == null) sb.append("Collecting the first few seconds…");
-        else sb.append(String.format(Locale.US, "Measuring · %.0f samples/s · %.0f s window", lastSpectrum.fs, WINDOW_S));
+        boolean tap = measurePage == PAGE_TAP;
+        if (!running) sb.append(slow == null ? "Stopped" : "Stopped · last reading kept");
+        else if (slow == null) sb.append("Collecting the first few seconds…");
+        else sb.append(String.format(Locale.US, "Measuring · %.0f samples/s · %.0f s window", slow.fs, slow.seconds));
         if (frozen) sb.append(" · frozen");
-        if (lastSpectrum != null && !tapMode && rpm > 0) {
-            double secondOrder = rpm / 30.0;
-            if (lastSpectrum.fs < secondOrder * 2.2) {
-                sb.append(String.format(Locale.US,
-                        "\nWarning: %.0f samples/s is too slow to see %.0f Hz. Results above %.0f Hz are not reliable.",
-                        lastSpectrum.fs, secondOrder, lastSpectrum.fs / 2.2));
+        if (running && mic.isRunning() && sound != null) {
+            sb.append(String.format(Locale.US, "\nMicrophone on · %.0f dBFS", sound.levelDb));
+            if (sound.clipped) sb.append(" · too loud for the mic, move the phone away");
+        } else if (running && micBox.isChecked() && !tap && mic.error() != null) {
+            sb.append("\n").append(mic.error());
+        }
+        if (slow != null) {
+            if (slow.gaps > 0) sb.append(String.format(Locale.US, "\nThe sensor skipped %d sample%s; they were filled in.", slow.gaps, slow.gaps == 1 ? "" : "s"));
+            if (!tap && !Double.isNaN(rpmValue)) {
+                double secondOrder = rpmValue / 30.0;
+                if (slow.fs < secondOrder * 2.2) {
+                    sb.append(String.format(Locale.US,
+                            "\nWarning: %.0f samples/s is too slow to see %.0f Hz. Results above %.0f Hz are not reliable.",
+                            slow.fs, secondOrder, slow.fs / 2.2));
+                }
             }
         }
         status.setText(sb.toString());
+        boolean live = running && !frozen;
+        liveDotBg.setColor(live ? Theme.OK : Theme.MUTED);
+        if (live && !dotPulse.isStarted()) dotPulse.start();
+        if (!live && dotPulse.isStarted()) {
+            dotPulse.cancel();
+            liveDot.setAlpha(1f);
+        }
     }
 
-    private void updateRpmLine(AutoRpm.Result auto, double typed) {
-        altRow.removeAllViews();
-        if (tapMode) {
-            rpmLine.setVisibility(View.GONE);
-            altRow.setVisibility(View.GONE);
+    private void updateGauges(double now) {
+        if (rpmGaugeView == null) return;
+        // Engine speed.
+        double shown = rpmSrc == RpmSrc.OBD ? rpmGauge : rpmValue;
+        if (!Double.isNaN(shown)) {
+            if (shown > 3700 && rpmGaugeView.getScaleMax() < 8000) rpmGaugeView.setScale(8000, 2000);
+            else if (shown < 3200 && rpmGaugeView.getScaleMax() > 4000) rpmGaugeView.setScale(4000, 1000);
+        }
+        rpmGaugeView.setValue(shown);
+        rpmGaugeView.setLive(running && !frozen || rpmSrc == RpmSrc.OBD);
+        String sub;
+        int col = Theme.MUTED;
+        switch (rpmSrc) {
+            case OBD: sub = "from the ECU · exact"; col = Theme.OK; break;
+            case ENGINE_OFF: sub = "ECU says engine off"; break;
+            case LOCKED: sub = "locked to your tach"; col = Theme.OK; break;
+            case VIB_SOUND: sub = "vibration + sound"; col = Theme.OK; break;
+            case VIB:
+                sub = rpmConf >= 0.75 ? "from vibration · sure" : rpmConf >= 0.45 ? "from vibration · fair" : "from vibration · unsure";
+                col = rpmConf >= 0.75 ? Theme.OK : Theme.WARN;
+                break;
+            case SOUND: sub = "from engine sound"; col = rpmConf >= 0.75 ? Theme.OK : Theme.WARN; break;
+            case TYPED: sub = rpmFallback ? "typed · can't measure" : "typed"; col = rpmFallback ? Theme.WARN : Theme.MUTED; break;
+            default:
+                sub = !running ? "press Start" : rpmMoving ? "engine speed moving" : "listening…";
+        }
+        if (rpmHolding) { sub = rpmMoving ? "engine speed moving" : "holding…"; col = Theme.WARN; }
+        if (!running && !Double.isNaN(shown) && rpmSrc != RpmSrc.OBD && rpmSrc != RpmSrc.TYPED) sub = "last reading";
+        rpmGaugeView.setSub(sub, col);
+
+        // Road speed.
+        boolean gpsWanted = gpsBox.isChecked();
+        boolean gpsOk = gpsWanted && granted(Manifest.permission.ACCESS_FINE_LOCATION);
+        double v;
+        String ssub;
+        int scol = Theme.MUTED;
+        double g = gpsOk ? gpsSpeed.kmh(now) : Double.NaN;
+        double o = obdSpeed.latest(now, 3);
+        if (!Double.isNaN(g)) {
+            v = g;
+            double acc = gpsSpeed.accuracyKmh(now);
+            ssub = "GPS" + (Double.isNaN(acc) ? "" : String.format(Locale.US, " ±%.1f", acc))
+                    + (satsUsed > 0 ? " · " + satsUsed + " sats" : "");
+            scol = Theme.OK;
+        } else if (!Double.isNaN(o)) {
+            v = o;
+            ssub = gpsWanted ? "ECU · no GPS yet" : "from the ECU";
+            scol = Theme.OK;
+        } else if (!gpsWanted) {
+            v = num(kmhIn);
+            ssub = "typed · tap for GPS";
+        } else {
+            v = Double.NaN;
+            if (!gpsOk) { ssub = "tap to allow location"; scol = Theme.WARN; }
+            else if (!gpsEnabled()) { ssub = "location is off · tap"; scol = Theme.WARN; }
+            else ssub = satsSeen >= 0 ? "satellites " + Math.max(0, satsUsed) + "/" + satsSeen : "waiting for GPS…";
+        }
+        if (!Double.isNaN(v)) {
+            if (v > 150 && speedGaugeView.getScaleMax() < 240) speedGaugeView.setScale(240, 40);
+            else if (v < 130 && speedGaugeView.getScaleMax() > 160) speedGaugeView.setScale(160, 40);
+        }
+        speedGaugeView.setValue(v);
+        speedGaugeView.setLive(!Double.isNaN(g));
+        speedGaugeView.setSub(ssub, scol);
+    }
+
+    /** "Tach shows about 786?" chips for the other readings the engine could be at. */
+    private void updateChips(final double now) {
+        boolean show = measurePage == PAGE_SHAKE && running && lastEst != null && autoBox.isChecked()
+                && (lastEst.locked || !lastEst.alternatives.isEmpty());
+        StringBuilder sig = new StringBuilder();
+        if (show) {
+            sig.append(lastEst.locked ? "L" : "A");
+            for (int i = 0; i < Math.min(2, lastEst.alternatives.size()); i++) sig.append(Math.round(lastEst.alternatives.get(i) / 25.0)).append(',');
+        }
+        if (sig.toString().equals(chipSignature)) return;
+        chipSignature = sig.toString();
+        chipRow.removeAllViews();
+        if (!show) {
+            chipRow.setVisibility(View.GONE);
             return;
         }
-        rpmLine.setVisibility(View.VISIBLE);
-        if (auto != null) {
-            rpmLine.setText(String.format(Locale.US,
-                    "Engine speed measured from the peaks: %.0f rpm (you typed %.0f)", auto.rpm, typed));
-            rpmLine.setTextColor(Theme.OK);
-            for (final double alt : auto.others) {
-                Button b = button(String.format(Locale.US, "Tach showed about %.0f?", alt));
-                b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                b.setOnClickListener(v -> rpmIn.setText(String.format(Locale.US, "%.0f", alt)));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(44), 1f);
-                if (altRow.getChildCount() > 0) lp.leftMargin = dp(8);
-                altRow.addView(b, lp);
-            }
-            altRow.setVisibility(altRow.getChildCount() > 0 ? View.VISIBLE : View.GONE);
-        } else if (autoBox.isChecked() && !lastPeaks.isEmpty()) {
-            rpmLine.setText(String.format(Locale.US,
-                    "Couldn't read engine speed from the peaks. Using the %.0f rpm you typed.", typed));
-            rpmLine.setTextColor(Theme.WARN);
-            altRow.setVisibility(View.GONE);
-        } else if (!autoBox.isChecked()) {
-            rpmLine.setText(String.format(Locale.US, "Using the %.0f rpm you typed.", typed));
-            rpmLine.setTextColor(Theme.MUTED);
-            altRow.setVisibility(View.GONE);
-        } else {
-            rpmLine.setText("Engine speed will be measured from the peaks.");
-            rpmLine.setTextColor(Theme.MUTED);
-            altRow.setVisibility(View.GONE);
+        chipRow.setVisibility(View.VISIBLE);
+        if (lastEst.locked) {
+            TextView b = Ui.chip(this, "Locked to your tach · tap to release", Theme.OK);
+            b.setOnClickListener(v -> {
+                v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                vibTracker.unlock();
+                soundTracker.unlock();
+                chipSignature = "";
+            });
+            chipRow.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            return;
+        }
+        for (int i = 0; i < Math.min(2, lastEst.alternatives.size()); i++) {
+            final double alt = lastEst.alternatives.get(i);
+            TextView b = Ui.chip(this, String.format(Locale.US, "Tach shows ≈ %.0f?", Math.round(alt / 10.0) * 10.0), Theme.ENGINE);
+            b.setOnClickListener(v -> {
+                v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                double t = nowSec();
+                vibTracker.lock(alt, t);
+                soundTracker.lock(alt, t);
+                chipSignature = "";
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            if (i > 0) lp.leftMargin = Ui.dp(this, 8);
+            chipRow.addView(b, lp);
         }
     }
 
-    private void showWaiting() {
-        chip.setTextColor(Theme.MUTED);
-        resultCheck.setText("");
-        peaksText.setText("");
-        if (tapMode) {
-            chip.setText(running ? "LISTENING" : "TAP TEST");
-            resultTitle.setText(running ? "Tap the part now" : "Press Start, then tap the part");
-            resultWhat.setText("Engine off and exhaust cold. Tape the phone firmly to the part, press Start, tap the part sharply 3–4 times, then press Freeze.");
-        } else {
-            chip.setText(running ? "LISTENING" : "NO READING YET");
-            resultTitle.setText(running ? "Hold the engine steady" : "Press Start to measure");
-            resultWhat.setText("Lay the phone flat on the seat rail or centre console. Hold the rpm, under load if that's when it shakes.");
+    private void setVerdict(String chipText, int chipColor, String title, String what, String check, String note, double mg) {
+        String sig = chipText + "|" + title;
+        chip.setText(chipText);
+        chip.setTextColor(chipColor);
+        resultTitle.setText(title);
+        resultWhat.setText(what);
+        resultCheck.setText(check);
+        resultCheck.setVisibility(check.isEmpty() ? View.GONE : View.VISIBLE);
+        resultNote.setText(note);
+        resultNote.setVisibility(note.isEmpty() ? View.GONE : View.VISIBLE);
+        levelMeter.setLevel(mg);
+        levelMeter.setVisibility(Double.isNaN(mg) ? View.GONE : View.VISIBLE);
+        // Only animate when the verdict itself changed, not on every small number update.
+        String coarse = chipText.split("·")[0] + "|" + title.split("·")[0];
+        if (!coarse.equals(verdictSignature)) {
+            verdictSignature = coarse;
+            Ui.nudge(resultTitle);
         }
     }
 
-    private void showEngineResult(List<Orders.Source> src, double rpm) {
-        Analysis.Peak top = lastPeaks.get(0);
-        Orders.Source best = Orders.bestMatch(src, top.hz, MATCH_TOL);
-        if (best != null) {
-            chip.setText(String.format(Locale.US, "MATCH · %s", pct(best.diff(top.hz))));
-            chip.setTextColor(Theme.OK);
-            resultTitle.setText(String.format(Locale.US, "%s · %.1f Hz", best.name, top.hz));
-            resultWhat.setText(best.what);
-            resultCheck.setText("Check: " + best.check);
+    private void showWaiting(boolean tap, boolean soundView) {
+        peaksCaption.setText("STRONGEST PEAKS");
+        if (tap) {
+            setVerdict(running ? "LISTENING" : "TAP TEST", Theme.MUTED,
+                    running ? "Tap the part now" : "Press Start, then tap the part",
+                    "Engine off and exhaust cold. Tape the phone firmly to the part, press Start, tap the part sharply 3–4 times, then press Freeze.",
+                    "", "", Double.NaN);
+        } else if (soundView) {
+            setVerdict(running ? "LISTENING" : "NO READING YET", Theme.MUTED,
+                    running ? (sound == null ? "Listening to the engine…" : "No clear tone in the sound") : "Press Start to hear the engine",
+                    "Windows up, fan and radio off. The app looks for steady tones and matches them to engine speed and road speed.",
+                    "", "", Double.NaN);
+        } else if (running && slow != null) {
+            setVerdict("TOO QUIET TO CALL", Theme.MUTED, "Nothing stands out of the noise",
+                    "Either the car is smooth right now, or the phone is sitting on something soft. Lay it flat on the seat rail or the centre console.",
+                    "", "", Double.NaN);
+        } else {
+            setVerdict(running ? "LISTENING" : "NO READING YET", Theme.MUTED,
+                    running ? "Hold the engine steady" : "Press Start to measure",
+                    "Lay the phone flat on the seat rail or centre console. Hold the rpm, under load if that's when it shakes.",
+                    "", "", Double.NaN);
+        }
+    }
+
+    private void showEngineResult(List<Orders.Source> src, Analysis.Peak top, double df) {
+        double mg = top.amp / G * 1000;
+        Orders.Source best = Orders.bestMatch(src, top.hz, df);
+        Orders.Source rival = Orders.rival(src, best, top.hz, df);
+        StringBuilder note = new StringBuilder();
+        note.append(String.format(Locale.US, "%.1f mg · %s · %.0f× above the noise", mg,
+                Theme.LEVEL_NAME[Theme.levelIndex(mg)].toLowerCase(Locale.US), top.snr));
+        if (!Double.isNaN(top.vertFrac)) {
+            note.append(top.vertFrac > 0.66 ? String.format(Locale.US, "\nDirection: mostly up-down (%.0f%%)", top.vertFrac * 100)
+                    : top.vertFrac < 0.34 ? String.format(Locale.US, "\nDirection: mostly sideways or fore-aft (%.0f%%)", (1 - top.vertFrac) * 100)
+                    : "\nDirection: a mix of up-down and sideways");
+        }
+        if (rpmMoving || (slow != null && !Double.isNaN(slow.drift) && slow.drift > 0.02)) {
+            note.append("\nEngine speed moved during this reading. Hold it steadier for exact strengths.");
+        }
+        if (speedSrc == SpeedSrc.GPS && kmhValue > 5 && gpsSpeed.spreadKmh(nowSec(), SLOW_WIN) > Math.max(3, 0.08 * kmhValue)) {
+            note.append("\nRoad speed changed during this reading. Hold a steady speed for the tyre and propshaft lines.");
+        }
+        if (speedSrc == SpeedSrc.NONE && gpsBox.isChecked()) {
+            note.append("\nNo road speed yet, so tyre and propshaft aren't checked.");
+        }
+        double load = obdLoad.latest(nowSec(), 6);
+        if (!Double.isNaN(load)) note.append(String.format(Locale.US, "\nEngine load %.0f%% (from the ECU)", load));
+        if (Double.isNaN(rpmValue)) {
+            note.append(rpmMoving ? "\nEngine speed is moving too fast to read."
+                    : "\nEngine speed couldn't be read. Type it under Setup, or connect OBD2.");
+        }
+
+        if (best != null && rival != null) {
+            setVerdict("TWO PARTS FIT", Theme.WARN,
+                    String.format(Locale.US, "%s or %s · %.1f Hz", best.name, rival.name.toLowerCase(Locale.US), top.hz),
+                    "Both turn at this frequency right now, so this reading can't tell them apart.",
+                    "To separate them: hold the same rpm at a different road speed. The engine line stays put; the tyre and propshaft lines move.",
+                    note.toString(), mg);
+        } else if (best != null) {
+            setVerdict(String.format(Locale.US, "MATCH · %s", pct(best.diff(top.hz))), Theme.OK,
+                    String.format(Locale.US, "%s · %.1f Hz", best.name, top.hz),
+                    best.what, "Check: " + best.check, note.toString(), mg);
         } else {
             Orders.Source near = Orders.nearest(src, top.hz);
-            chip.setText("NO CLEAN MATCH");
-            chip.setTextColor(Theme.WARN);
-            resultTitle.setText(String.format(Locale.US, "%.1f Hz doesn't line up with a turning part", top.hz));
-            resultWhat.setText(near == null ? "Type the engine speed so the app can compare."
-                    : String.format(Locale.US, "Closest is %s at %.1f Hz (%s). A peak that stays put when rpm and speed change is usually a bracket, pipe or panel resonating on its own.",
-                    near.name, near.hz, pct(near.diff(top.hz))));
-            resultCheck.setText("Use Tap test mode to find which part rings at this frequency.");
+            setVerdict("NO CLEAN MATCH", Theme.WARN,
+                    String.format(Locale.US, "%.1f Hz doesn't line up with a turning part", top.hz),
+                    near == null ? "Without engine speed there is nothing to compare this peak with."
+                            : String.format(Locale.US, "Closest is %s at %.1f Hz (%s). A peak that stays put when rpm and speed change is usually a bracket, pipe or panel resonating on its own.",
+                            near.name, near.hz, pct(near.diff(top.hz))),
+                    "Use Tap test to find which part rings at this frequency.", note.toString(), mg);
         }
-
-        StringBuilder ps = new StringBuilder("Strongest peaks\n");
-        int shown = 0;
-        for (Analysis.Peak p : lastPeaks) {
-            if (shown >= 5) break;
-            Orders.Source m = Orders.bestMatch(src, p.hz, MATCH_TOL);
-            ps.append(String.format(Locale.US, "%6.1f Hz %6.1f mg  %s\n", p.hz, p.amp / G * 1000,
-                    m == null ? "–" : m.name.replace("Engine ", "").replace(" order", "") + (m.family == Orders.Family.ENGINE ? " engine" : "")));
-            shown++;
-        }
-        peaksText.setText(ps.toString().trim());
     }
 
-    private void showTapResult() {
-        Analysis.Peak top = lastPeaks.get(0);
-        chip.setText("TAP TEST");
-        chip.setTextColor(Theme.OK);
-        resultTitle.setText(String.format(Locale.US, "This part rings at %.1f Hz", top.hz));
-        resultWhat.setText(String.format(Locale.US,
-                "The engine's 2nd order reaches %.1f Hz at %.0f rpm, and its 4th order at %.0f rpm. "
-                        + "If either is where you feel the shake, this part is a prime suspect.",
-                top.hz, top.hz * 30, top.hz * 15));
-        resultCheck.setText("Test each suspect part the same way and compare. Only the part ringing near your shake frequency matters.");
-
-        StringBuilder ps = new StringBuilder("Strongest peaks\n");
-        int shown = 0;
-        for (Analysis.Peak p : lastPeaks) {
-            if (shown >= 4) break;
-            ps.append(String.format(Locale.US, "%6.1f Hz  2nd order at %4.0f rpm\n", p.hz, p.hz * 30));
-            shown++;
+    private void showSoundResult(List<Orders.Source> src, Analysis.Peak top) {
+        Orders.Source best = Orders.bestMatch(src, top.hz, sound != null ? sound.df : 0.7);
+        double above = 20 * Math.log10(top.amp);
+        String note = String.format(Locale.US, "%.0f dB above the background · level %.0f dBFS (phone mics aren't calibrated, so compare readings, don't quote them)",
+                above, peakDb(top));
+        if (best == null) {
+            setVerdict("NOT A TURNING PART", Theme.WARN,
+                    String.format(Locale.US, "Tone at %.1f Hz", top.hz),
+                    Double.isNaN(rpmValue) ? "Engine speed isn't known yet, so this tone can't be matched."
+                            : "This tone doesn't follow engine speed or road speed. Likely the heater fan, a pump, wind, or a panel buzzing on its own.",
+                    "Switch the fan off and see if it goes. If it stays at the same pitch when rpm changes, it isn't the engine.",
+                    note, Double.NaN);
+            return;
         }
-        peaksText.setText(ps.toString().trim());
+        String what, check;
+        double order = best.family == Orders.Family.ENGINE && rpmValue > 0 ? Math.round(top.hz / (rpmValue / 60) * 2) / 2.0 : -1;
+        if (best.family == Orders.Family.ENGINE && order % 2 == 0) {
+            what = "A firing-pulse sound: the boom or drone of exhaust and intake. Every four-cylinder makes it. It is a problem only when it gets loud at one rpm.";
+            check = "Check: exhaust touching the body, loose heat shields, a hanger or bracket out of place, an intake pipe resting on something.";
+        } else if (best.family == Orders.Family.ENGINE && order == 1) {
+            what = "A once-per-turn sound from something at crank speed.";
+            check = "Check: crank pulley, belt and idlers, anything rubbing the pulley.";
+        } else if (best.family == Orders.Family.ENGINE) {
+            what = "An uneven-firing sound. The cylinders aren't pulling equally, which gives a burble or a beat.";
+            check = "Check: roughness monitor, coils, injectors, an exhaust leak near one cylinder.";
+        } else if (best.family == Orders.Family.TYRE) {
+            what = "A hum that follows road speed at wheel rate: tyre tread or a wheel bearing.";
+            check = "Check: it changes with road surface (tyres) or when you swerve gently left and right (bearing).";
+        } else {
+            what = "A hum or whine that follows road speed at propshaft rate.";
+            check = "Check: propshaft centre bearing, differential, U-joints.";
+        }
+        setVerdict(String.format(Locale.US, "MATCH · %s", pct(best.diff(top.hz))), Theme.OK,
+                String.format(Locale.US, "%s · %.1f Hz", best.name, top.hz), what, check, note, Double.NaN);
+    }
+
+    private void showTapResult(Analysis.Peak top) {
+        setVerdict("TAP TEST", Theme.OK,
+                String.format(Locale.US, "This part rings at %.1f Hz", top.hz),
+                String.format(Locale.US,
+                        "The engine's 2nd order reaches %.1f Hz at %.0f rpm, and its 4th order at %.0f rpm. "
+                                + "If either is where you feel the shake, this part is a prime suspect.",
+                        top.hz, top.hz * 30, top.hz * 15),
+                "Test each suspect part the same way and compare. Only the part ringing near your shake frequency matters.",
+                "", Double.NaN);
+    }
+
+    private void updatePeakList(boolean soundView, boolean tap, List<Orders.Source> src, List<Analysis.Peak> peaks,
+                                Analysis.Peak subject, double plotDf) {
+        List<PeakListView.Row> rows = new ArrayList<>();
+        double max = peaks.isEmpty() ? 1 : (soundView ? 20 * Math.log10(peaks.get(0).amp) : peaks.get(0).amp);
+        for (int i = 0; i < Math.min(6, peaks.size()); i++) {
+            Analysis.Peak p = peaks.get(i);
+            Orders.Source m = tap ? null : Orders.bestMatch(src, p.hz, plotDf);
+            String tag = m == null ? "–" : m.shortName;
+            int col = m == null ? Theme.MUTED : Theme.familyColor(m.family);
+            if (soundView) {
+                double above = 20 * Math.log10(p.amp);
+                rows.add(new PeakListView.Row(tag, col, p.hz, String.format(Locale.US, "+%.0f dB", above), above / max));
+            } else if (tap) {
+                rows.add(new PeakListView.Row("2E", Theme.ENGINE, p.hz, String.format(Locale.US, "%.0f rpm", p.hz * 30), p.amp / max));
+            } else {
+                rows.add(new PeakListView.Row(tag, col, p.hz, String.format(Locale.US, "%.1f mg", p.amp / G * 1000), p.amp / max));
+            }
+        }
+        peaksCaption.setText(tap ? "RINGS AT · RPM WHERE 2ND ORDER HITS IT"
+                : rows.isEmpty() ? "STRONGEST PEAKS" : "STRONGEST PEAKS · TAP ONE");
+        peakList.setRows(rows, subject == null ? Double.NaN : subject.hz);
+        peaksCard.setVisibility(rows.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void pick(double hz) {
+        selectedHz = hz;
+        verdictSignature = "";
+        refresh();
     }
 
     private static String pct(double d) {
@@ -341,27 +849,289 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
     }
 
+    // ---------------------------------------------------------------- GPS
+
+    private boolean gpsEnabled() {
+        try {
+            return locationManager != null && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private void startGpsIfWanted(boolean mayAsk) {
+        if (!gpsBox.isChecked() || locationManager == null || gpsListening) return;
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            if (mayAsk && !prefs.getBoolean("askedLoc", false)) {
+                prefs.edit().putBoolean("askedLoc", true).apply();
+                requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_LOCATION);
+            }
+            return;
+        }
+        try {
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 500L, 0f, this, Looper.getMainLooper());
+            gpsListening = true;
+            if (gnssCallback == null) {
+                gnssCallback = new GnssStatus.Callback() {
+                    @Override public void onSatelliteStatusChanged(GnssStatus s) {
+                        int used = 0;
+                        for (int i = 0; i < s.getSatelliteCount(); i++) if (s.usedInFix(i)) used++;
+                        satsUsed = used;
+                        satsSeen = s.getSatelliteCount();
+                    }
+                };
+            }
+            locationManager.registerGnssStatusCallback(gnssCallback, handler);
+        } catch (SecurityException | IllegalArgumentException e) {
+            gpsListening = false; // no permission after all, or this device has no GPS
+        }
+    }
+
+    private void stopGps() {
+        if (locationManager == null) return;
+        try {
+            locationManager.removeUpdates(this);
+            if (gnssCallback != null) locationManager.unregisterGnssStatusCallback(gnssCallback);
+        } catch (RuntimeException ignored) { }
+        gpsListening = false;
+        gpsSpeed.clear();
+        satsUsed = -1;
+        satsSeen = -1;
+    }
+
+    @Override
+    public void onLocationChanged(Location l) {
+        if (l == null || !l.hasSpeed()) return;
+        double acc = Double.NaN;
+        if (Build.VERSION.SDK_INT >= 26 && l.hasSpeedAccuracy()) acc = l.getSpeedAccuracyMetersPerSecond();
+        gpsSpeed.add(l.getElapsedRealtimeNanos() / 1e9, l.getSpeed(), acc);
+        if (!running) updateGauges(nowSec());
+    }
+
+    @Override public void onProviderEnabled(String provider) { updateGauges(nowSec()); }
+    @Override public void onProviderDisabled(String provider) { gpsSpeed.clear(); updateGauges(nowSec()); }
+    @SuppressWarnings("deprecation")
+    @Override public void onStatusChanged(String provider, int statusCode, Bundle extras) { }
+
+    private void onSpeedGaugeTap() {
+        if (gpsBox.isChecked()) {
+            if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_LOCATION);
+                return;
+            }
+            if (!gpsEnabled()) {
+                try {
+                    startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+                } catch (RuntimeException ignored) { }
+                return;
+            }
+        }
+        gpsBox.setChecked(!gpsBox.isChecked());
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        boolean ok = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
+        if (requestCode == REQ_LOCATION) {
+            if (ok) startGpsIfWanted(false);
+            updateGauges(nowSec());
+        } else if (requestCode == REQ_MIC) {
+            if (!ok) micBox.setChecked(false);
+            else if (running && measurePage == PAGE_SHAKE) mic.start(this);
+            applySourceSwitch();
+            refresh();
+        } else if (requestCode == REQ_BT) {
+            int action = pendingBtAction;
+            pendingBtAction = 0;
+            if (!ok) {
+                obdPage.setState(ObdLink.State.FAILED, "Bluetooth permission was refused.");
+            } else if (action == 1) obdChooseAdapter();
+            else if (action == 2) connectObd(true);
+        }
+    }
+
+    // ---------------------------------------------------------------- OBD2
+
+    private boolean btPermission(int action) {
+        if (Build.VERSION.SDK_INT < 31 || granted(Manifest.permission.BLUETOOTH_CONNECT)) return true;
+        pendingBtAction = action;
+        requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQ_BT);
+        return false;
+    }
+
+    private boolean btReady(boolean prompt) {
+        if (btAdapter == null || link == null) {
+            obdPage.setState(ObdLink.State.FAILED, "This phone has no Bluetooth.");
+            return false;
+        }
+        try {
+            if (!btAdapter.isEnabled()) {
+                obdPage.setState(ObdLink.State.FAILED, "Bluetooth is switched off.");
+                if (prompt) startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE));
+                return false;
+            }
+        } catch (RuntimeException e) {
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public void obdChooseAdapter() {
+        if (!btPermission(1) || !btReady(true)) return;
+        final List<BluetoothDevice> devices = new ArrayList<>();
+        try {
+            Set<BluetoothDevice> bonded = btAdapter.getBondedDevices();
+            if (bonded != null) devices.addAll(bonded);
+        } catch (SecurityException e) {
+            obdPage.setState(ObdLink.State.FAILED, "Bluetooth permission is missing.");
+            return;
+        }
+        AlertDialog.Builder b = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert);
+        if (devices.isEmpty()) {
+            b.setTitle("No paired devices")
+                    .setMessage("Plug the adapter into the car, switch the ignition on, then pair it in Android's Bluetooth settings. The PIN is usually 1234 or 0000.")
+                    .setPositiveButton("Open Bluetooth settings", (d, w) -> {
+                        try { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); } catch (RuntimeException ignored) { }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            return;
+        }
+        String[] names = new String[devices.size()];
+        for (int i = 0; i < names.length; i++) {
+            String n = null;
+            try { n = devices.get(i).getName(); } catch (SecurityException ignored) { }
+            names[i] = (n == null || n.isEmpty() ? "Unnamed device" : n) + "\n" + devices.get(i).getAddress();
+        }
+        b.setTitle("Choose your OBD2 adapter")
+                .setItems(names, (d, which) -> {
+                    String label = names[which].split("\n")[0];
+                    prefs.edit().putString("obdMac", devices.get(which).getAddress()).putString("obdName", label).apply();
+                    obdPage.setAdapterName(label);
+                    connectObd(true);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void connectObd(boolean userAsked) {
+        String mac = prefs.getString("obdMac", "");
+        if (mac.isEmpty()) {
+            if (userAsked) obdChooseAdapter();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 31 && !granted(Manifest.permission.BLUETOOTH_CONNECT)) {
+            if (userAsked) btPermission(2);
+            return;
+        }
+        if (!btReady(userAsked)) return;
+        prefs.edit().putBoolean("obd", true).apply();
+        if (!obdBox.isChecked()) { loading = true; obdBox.setChecked(true); loading = false; }
+        link.setLiveAll(page == PAGE_OBD);
+        link.start(mac, prefs.getString("obdName", ""));
+    }
+
+    private void disconnectObd() {
+        prefs.edit().putBoolean("obd", false).apply();
+        if (obdBox.isChecked()) { loading = true; obdBox.setChecked(false); loading = false; }
+        if (link != null) link.stop();
+        obdRpm.clear();
+        obdSpeed.clear();
+    }
+
+    @Override
+    public void obdToggleConnection() {
+        if (link != null && link.state() != ObdLink.State.OFF && link.state() != ObdLink.State.FAILED) disconnectObd();
+        else connectObd(true);
+    }
+
+    @Override
+    public void obdReadCodes() {
+        if (link == null || !link.isLive()) return;
+        obdPage.setBusy("Reading codes…");
+        link.readCodes();
+    }
+
+    @Override
+    public void obdClearCodes() {
+        if (link == null || !link.isLive()) return;
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Clear all fault codes?")
+                .setMessage("This erases the stored codes and the freeze frame, switches the check-engine light off, and resets the self-tests. The car may also forget its learned fuel trims and idle for a while. A fault that is still there will set its code again.\n\nDo it with the ignition on and the engine off.")
+                .setPositiveButton("Clear codes", (d, w) -> {
+                    obdPage.setBusy("Clearing codes…");
+                    link.clearCodes();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    @Override
+    public void obdReadFreeze() {
+        if (link != null && link.isLive()) link.readFreeze();
+    }
+
+    @Override
+    public void onObdState(ObdLink.State state, String detail) {
+        obdPage.setState(state, detail);
+        if (state != ObdLink.State.LIVE) {
+            obdRpm.clear();
+            obdSpeed.clear();
+        }
+    }
+
+    @Override
+    public void onObdValue(int pid, double value, double tSec) {
+        if (pid == 0x0C) obdRpm.add(tSec, value);
+        else if (pid == 0x0D) obdSpeed.add(tSec, value);
+        else if (pid == 0x04) obdLoad.add(tSec, value);
+        obdPage.onValue(pid, value);
+        if (pid == 0x0C && !running) liveSources();
+    }
+
+    @Override public void onObdInfo(String adapter, String protocol, double volts) { obdPage.setInfo(adapter, protocol, volts); }
+    @Override public void onObdSupported(List<Integer> pids) { obdPage.setSupported(pids); }
+    @Override public void onObdCodes(ObdLink.Codes codes) { obdPage.setCodes(codes); }
+    @Override public void onObdFreeze(ObdLink.Freeze freeze) { obdPage.setFreeze(freeze); }
+    @Override public void onObdCleared(boolean ok) { obdPage.setCleared(ok); }
+
     // ---------------------------------------------------------------- inputs
 
     private void loadInputs() {
         loading = true;
-        rpmIn.setText(prefs.getString("rpm", "1400"));
+        rpmIn.setText(prefs.getString("rpm2", ""));
         kmhIn.setText(prefs.getString("kmh", "0"));
         tyreIn.setText(prefs.getString("tyre", "225/55R18"));
         fdIn.setText(prefs.getString("fd", "3.700"));
         autoBox.setChecked(prefs.getBoolean("auto", true));
-        tapMode = prefs.getBoolean("tap", false);
+        gpsBox.setChecked(prefs.getBoolean("gps", true));
+        micBox.setChecked(prefs.getBoolean("mic", false) && granted(Manifest.permission.RECORD_AUDIO));
+        obdBox.setChecked(prefs.getBoolean("obd", false));
+        obdPage.setAdapterName(prefs.getString("obdName", ""));
+        page = prefs.getBoolean("tap", false) ? PAGE_TAP : PAGE_SHAKE;
+        measurePage = page;
+        pageSwitch.setSelected(page, false);
+        kmhRow.setVisibility(gpsBox.isChecked() ? View.GONE : View.VISIBLE);
+        setupBody.setVisibility(prefs.getBoolean("setupOpen", false) ? View.VISIBLE : View.GONE);
+        setupHeader.setText(setupBody.getVisibility() == View.VISIBLE ? "SETUP  ▴" : "SETUP  ▾");
         loading = false;
+        applySourceSwitch();
     }
 
     private void saveInputs() {
         prefs.edit()
-                .putString("rpm", rpmIn.getText().toString())
+                .putString("rpm2", rpmIn.getText().toString())
                 .putString("kmh", kmhIn.getText().toString())
                 .putString("tyre", tyreIn.getText().toString())
                 .putString("fd", fdIn.getText().toString())
                 .putBoolean("auto", autoBox.isChecked())
-                .putBoolean("tap", tapMode)
+                .putBoolean("gps", gpsBox.isChecked())
+                .putBoolean("mic", micBox.isChecked())
+                .putBoolean("tap", measurePage == PAGE_TAP)
                 .apply();
     }
 
@@ -371,7 +1141,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         @Override public void afterTextChanged(Editable s) {
             if (loading) return;
             saveInputs();
-            refresh();
+            if (!running || frozen) { liveSources(); refresh(); }
         }
     };
 
@@ -380,108 +1150,80 @@ public class MainActivity extends Activity implements SensorEventListener {
         rpmIn.setText(String.format(Locale.US, "%.0f", v));
     }
 
-    private void setMode(boolean tap) {
-        if (tapMode == tap) return;
-        tapMode = tap;
+    private void setPage(int p) {
+        if (page == p) return;
+        if (p != PAGE_OBD && p != measurePage) {
+            // Engine and Tap test measure differently: start clean.
+            stopMeasuring();
+            slow = null;
+            slowPeaks = new ArrayList<>();
+            sound = null;
+            soundPeaks = new ArrayList<>();
+            selectedHz = Double.NaN;
+            verdictSignature = "";
+            measurePage = p;
+        }
+        page = p;
         saveInputs();
-        applyMode();
+        applyPage(true);
         refresh();
     }
 
-    private void applyMode() {
-        engineModeBtn.setBackgroundTintList(ColorStateList.valueOf(tapMode ? Theme.SURFACE : Theme.LINE));
-        engineModeBtn.setTextColor(tapMode ? Theme.MUTED : Theme.INK);
-        tapModeBtn.setBackgroundTintList(ColorStateList.valueOf(tapMode ? Theme.LINE : Theme.SURFACE));
-        tapModeBtn.setTextColor(tapMode ? Theme.INK : Theme.MUTED);
-        inputsCard.setVisibility(tapMode ? View.GONE : View.VISIBLE);
-        legend.setVisibility(tapMode ? View.GONE : View.VISIBLE);
-        intro.setText(tapMode
-                ? "Tap test: finds the frequency a part rings at. Engine off."
+    private void applyPage(boolean animate) {
+        boolean obd = page == PAGE_OBD, tap = measurePage == PAGE_TAP;
+        shakePage.setVisibility(obd ? View.GONE : View.VISIBLE);
+        obdPage.root.setVisibility(obd ? View.VISIBLE : View.GONE);
+        gaugeRow.setVisibility(tap ? View.GONE : View.VISIBLE);
+        inputsCard.setVisibility(tap ? View.GONE : View.VISIBLE);
+        legend.setVisibility(tap ? View.GONE : View.VISIBLE);
+        if (tap) chipRow.setVisibility(View.GONE);
+        chipSignature = "?";
+        applySourceSwitch();
+        intro.setText(obd ? "Live data, fault codes and exact rpm from the engine computer."
+                : tap ? "Tap test: finds the frequency a part rings at. Engine off."
                 : "Measures the shake, then names the part that turns at that frequency.");
+        if (link != null) link.setLiveAll(obd);
+        // Keep the screen awake on the live-data tab, like while measuring.
+        if (obd) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else if (!running) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (animate) {
+            Ui.enter(obd ? obdPage.root : shakePage, 0);
+            scroll.smoothScrollTo(0, 0);
+        }
+    }
+
+    private void applySourceSwitch() {
+        boolean engine = measurePage == PAGE_SHAKE;
+        sourceSwitch.setVisibility(engine ? View.VISIBLE : View.GONE);
+        if (showSound && (!engine || !micBox.isChecked())) {
+            showSound = false;
+            sourceSwitch.setSelected(0, true);
+        }
     }
 
     private void updateButtons() {
         startBtn.setText(running ? "Stop" : "Start");
-        startBtn.setBackgroundTintList(ColorStateList.valueOf(running ? Theme.LINE : Theme.ENGINE));
-        startBtn.setTextColor(running ? Theme.INK : Theme.BG);
+        Ui.paint(startBtn, running ? Theme.LINE : Theme.ENGINE, running ? Theme.INK : Theme.BG);
         freezeBtn.setEnabled(running);
         freezeBtn.setAlpha(running ? 1f : 0.4f);
         freezeBtn.setText(frozen ? "Resume" : "Freeze");
+        if (running && !frozen) {
+            if (!startPulse.isStarted()) startPulse.start();
+        } else {
+            startPulse.cancel();
+            startBtn.setScaleX(1f);
+            startBtn.setScaleY(1f);
+        }
     }
 
     // ---------------------------------------------------------------- UI
 
     private int dp(float v) {
-        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
-    }
-
-    private TextView text(float sp, int color, boolean bold) {
-        TextView t = new TextView(this);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        t.setLineSpacing(0, 1.15f);
-        return t;
-    }
-
-    private LinearLayout card() {
-        LinearLayout l = new LinearLayout(this);
-        l.setOrientation(LinearLayout.VERTICAL);
-        l.setPadding(dp(14), dp(14), dp(14), dp(14));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Theme.SURFACE);
-        bg.setCornerRadius(dp(10));
-        bg.setStroke(dp(1), Theme.LINE);
-        l.setBackground(bg);
-        return l;
-    }
-
-    private LinearLayout.LayoutParams gapBelow(int dpGap) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(dpGap);
-        return lp;
-    }
-
-    private EditText field(int inputType) {
-        EditText e = new EditText(this);
-        e.setInputType(inputType);
-        e.setTextColor(Theme.INK);
-        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        e.setTypeface(Typeface.MONOSPACE);
-        e.setSingleLine(true);
-        e.setBackgroundTintList(ColorStateList.valueOf(Theme.MUTED));
-        e.addTextChangedListener(watcher);
-        return e;
-    }
-
-    private View labelled(String label, View input, String unit) {
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        TextView l = text(13, Theme.MUTED, false);
-        l.setText(label);
-        col.addView(l);
-        col.addView(input);
-        if (unit != null) {
-            TextView u = text(12, Theme.MUTED, false);
-            u.setText(unit);
-            col.addView(u);
-        }
-        return col;
-    }
-
-    private Button button(String label) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        b.setTextColor(Theme.INK);
-        b.setBackgroundTintList(ColorStateList.valueOf(Theme.LINE));
-        return b;
+        return Ui.dp(this, v);
     }
 
     private View buildUi() {
-        ScrollView scroll = new ScrollView(this);
+        scroll = new ScrollView(this);
         scroll.setBackgroundColor(Theme.BG);
         scroll.setFillViewport(true);
 
@@ -490,129 +1232,264 @@ public class MainActivity extends Activity implements SensorEventListener {
         root.setPadding(dp(16), dp(20), dp(16), dp(28));
         scroll.addView(root);
 
-        TextView title = text(26, Theme.INK, true);
+        TextView title = Ui.text(this, 26, Theme.INK, true);
         title.setText("Shake Finder");
-        root.addView(title, gapBelow(2));
-        intro = text(14, Theme.MUTED, false);
-        root.addView(intro, gapBelow(12));
+        root.addView(title, Ui.gapBelow(this, 2));
+        intro = Ui.text(this, 14, Theme.MUTED, false);
+        root.addView(intro, Ui.gapBelow(this, 12));
 
-        // Mode switch.
-        LinearLayout modeRow = new LinearLayout(this);
-        modeRow.setOrientation(LinearLayout.HORIZONTAL);
-        engineModeBtn = button("Engine running");
-        tapModeBtn = button("Tap test");
-        engineModeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        tapModeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        LinearLayout.LayoutParams m1 = new LinearLayout.LayoutParams(0, dp(44), 1f);
-        LinearLayout.LayoutParams m2 = new LinearLayout.LayoutParams(0, dp(44), 1f);
-        m2.leftMargin = dp(8);
-        modeRow.addView(engineModeBtn, m1);
-        modeRow.addView(tapModeBtn, m2);
-        engineModeBtn.setOnClickListener(v -> setMode(false));
-        tapModeBtn.setOnClickListener(v -> setMode(true));
-        root.addView(modeRow, gapBelow(12));
+        pageSwitch = new SegmentView(this, "Engine", "Tap test", "OBD2");
+        pageSwitch.setListener(this::setPage);
+        root.addView(pageSwitch, Ui.gapBelow(this, 12));
+
+        shakePage = new LinearLayout(this);
+        shakePage.setOrientation(LinearLayout.VERTICAL);
+        shakePage.setLayoutTransition(new LayoutTransition());
+        root.addView(shakePage);
+        obdPage = new ObdPage(this, this);
+        root.addView(obdPage.root);
+
+        // Gauges.
+        gaugeRow = new LinearLayout(this);
+        gaugeRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout rpmCard = Ui.card(this);
+        rpmCard.setPadding(dp(6), dp(10), dp(6), dp(6));
+        rpmGaugeView = new GaugeView(this);
+        rpmGaugeView.configure("RPM", 4000, 1000, 0, Theme.ENGINE);
+        rpmGaugeView.setOnClickListener(v -> openSetup());
+        rpmCard.addView(rpmGaugeView);
+        LinearLayout speedCard = Ui.card(this);
+        speedCard.setPadding(dp(6), dp(10), dp(6), dp(6));
+        speedGaugeView = new GaugeView(this);
+        speedGaugeView.configure("KM/H", 160, 40, 0, Theme.SPEED);
+        speedGaugeView.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            onSpeedGaugeTap();
+        });
+        speedCard.addView(speedGaugeView);
+        gaugeRow.addView(rpmCard, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        sl.leftMargin = dp(10);
+        gaugeRow.addView(speedCard, sl);
+        shakePage.addView(gaugeRow, Ui.gapBelow(this, 10));
+
+        chipRow = new LinearLayout(this);
+        chipRow.setOrientation(LinearLayout.HORIZONTAL);
+        chipRow.setVisibility(View.GONE);
+        shakePage.addView(chipRow, Ui.gapBelow(this, 10));
 
         // Spectrum card.
-        LinearLayout specCard = card();
-        status = text(12, Theme.MUTED, false);
-        status.setTypeface(Typeface.MONOSPACE);
-        specCard.addView(status, gapBelow(8));
+        LinearLayout specCard = Ui.card(this);
+        specCard.setLayoutTransition(new LayoutTransition());
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        liveDot = new View(this);
+        liveDotBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        liveDotBg.setColor(Theme.MUTED);
+        liveDot.setBackground(liveDotBg);
+        LinearLayout.LayoutParams ld = new LinearLayout.LayoutParams(dp(9), dp(9));
+        ld.rightMargin = dp(8);
+        ld.topMargin = dp(4);
+        statusRow.addView(liveDot, ld);
+        dotPulse = ObjectAnimator.ofFloat(liveDot, "alpha", 1f, 0.25f);
+        dotPulse.setDuration(650);
+        dotPulse.setRepeatMode(ValueAnimator.REVERSE);
+        dotPulse.setRepeatCount(ValueAnimator.INFINITE);
+        status = Ui.text(this, 12, Theme.MUTED, false);
+        status.setTypeface(Theme.MONO);
+        statusRow.addView(status, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        specCard.addView(statusRow, Ui.gapBelow(this, 8));
+        sourceSwitch = new SegmentView(this, "Vibration", "Engine sound");
+        sourceSwitch.setListener(i -> {
+            showSound = i == 1;
+            selectedHz = Double.NaN;
+            verdictSignature = "";
+            // Choosing the sound chart switches the microphone on (and asks for it the first time).
+            if (showSound && !micBox.isChecked()) micBox.setChecked(true);
+            refresh();
+        });
+        specCard.addView(sourceSwitch, Ui.gapBelow(this, 8));
         spectrumView = new SpectrumView(this);
-        specCard.addView(spectrumView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(230)));
+        spectrumView.setListener(this::pick);
+        specCard.addView(spectrumView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(240)));
         legend = new LinearLayout(this);
         legend.setOrientation(LinearLayout.HORIZONTAL);
         legend.setPadding(0, dp(8), 0, 0);
-        String[] names = {"E engine", "P propshaft", "T tyre", "▲ your peak"};
+        String[] names = {"E engine", "P propshaft", "T tyre", "● peak"};
         int[] cols = {Theme.ENGINE, Theme.PROPSHAFT, Theme.TYRE, Theme.INK};
         for (int i = 0; i < names.length; i++) {
-            TextView t = text(12, cols[i], true);
+            TextView t = Ui.text(this, 12, cols[i], true);
             t.setText(names[i]);
             t.setPadding(0, 0, dp(14), 0);
             legend.addView(t);
         }
         specCard.addView(legend);
-        root.addView(specCard, gapBelow(12));
+        TextView chartTip = Ui.text(this, 12, Theme.MUTED, false);
+        chartTip.setText("Drag across the chart to read any frequency.");
+        chartTip.setPadding(0, dp(4), 0, 0);
+        specCard.addView(chartTip);
+        shakePage.addView(specCard, Ui.gapBelow(this, 12));
 
-        // Buttons.
+        // Start and Freeze.
         LinearLayout btnRow = new LinearLayout(this);
         btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        startBtn = button("Start");
-        freezeBtn = button("Freeze");
-        LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, dp(52), 1f);
-        LinearLayout.LayoutParams half2 = new LinearLayout.LayoutParams(0, dp(52), 1f);
-        half2.leftMargin = dp(10);
-        btnRow.addView(startBtn, half);
-        btnRow.addView(freezeBtn, half2);
-        startBtn.setOnClickListener(v -> { if (running) stopMeasuring(); else startMeasuring(); });
-        freezeBtn.setOnClickListener(v -> { frozen = !frozen; updateButtons(); refresh(); });
-        root.addView(btnRow, gapBelow(12));
+        startBtn = Ui.button(this, "Start", Theme.ENGINE, Theme.BG);
+        startBtn.setTextSize(17);
+        freezeBtn = Ui.button(this, "Freeze", Theme.LINE, Theme.INK);
+        freezeBtn.setTextSize(17);
+        btnRow.addView(startBtn, Ui.weight(this, 54, 0));
+        btnRow.addView(freezeBtn, Ui.weight(this, 54, 10));
+        startBtn.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            if (running) stopMeasuring(); else startMeasuring();
+        });
+        freezeBtn.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            frozen = !frozen;
+            updateButtons();
+            refresh();
+        });
+        startPulse = ObjectAnimator.ofPropertyValuesHolder(startBtn,
+                PropertyValuesHolder.ofFloat("scaleX", 1f, 0.97f),
+                PropertyValuesHolder.ofFloat("scaleY", 1f, 0.97f));
+        startPulse.setDuration(700);
+        startPulse.setRepeatMode(ValueAnimator.REVERSE);
+        startPulse.setRepeatCount(ValueAnimator.INFINITE);
+        shakePage.addView(btnRow, Ui.gapBelow(this, 12));
 
         // Verdict card.
-        LinearLayout res = card();
-        chip = text(12, Theme.MUTED, true);
+        LinearLayout res = Ui.card(this);
+        res.setLayoutTransition(new LayoutTransition());
+        chip = Ui.text(this, 12, Theme.MUTED, true);
         chip.setLetterSpacing(0.08f);
-        res.addView(chip, gapBelow(4));
-        resultTitle = text(22, Theme.INK, true);
-        res.addView(resultTitle, gapBelow(6));
-        rpmLine = text(13, Theme.OK, false);
-        res.addView(rpmLine, gapBelow(6));
-        altRow = new LinearLayout(this);
-        altRow.setOrientation(LinearLayout.HORIZONTAL);
-        res.addView(altRow, gapBelow(8));
-        resultWhat = text(15, Theme.INK, false);
-        res.addView(resultWhat, gapBelow(6));
-        resultCheck = text(14, Theme.MUTED, false);
-        res.addView(resultCheck, gapBelow(10));
-        peaksText = text(13, Theme.MUTED, false);
-        peaksText.setTypeface(Typeface.MONOSPACE);
-        res.addView(peaksText);
-        root.addView(res, gapBelow(12));
+        res.addView(chip, Ui.gapBelow(this, 4));
+        resultTitle = Ui.text(this, 21, Theme.INK, true);
+        res.addView(resultTitle, Ui.gapBelow(this, 8));
+        levelMeter = new LevelMeterView(this);
+        res.addView(levelMeter, Ui.gapBelow(this, 8));
+        resultWhat = Ui.text(this, 15, Theme.INK, false);
+        res.addView(resultWhat, Ui.gapBelow(this, 6));
+        resultCheck = Ui.text(this, 14, Theme.MUTED, false);
+        res.addView(resultCheck, Ui.gapBelow(this, 8));
+        resultNote = Ui.text(this, 12.5f, Theme.MUTED, false);
+        resultNote.setTypeface(Theme.MONO);
+        res.addView(resultNote);
+        shakePage.addView(res, Ui.gapBelow(this, 12));
 
-        // Inputs card.
-        inputsCard = card();
-        TextView inTitle = text(13, Theme.MUTED, true);
-        inTitle.setText("WHAT THE CAR IS DOING");
-        inTitle.setLetterSpacing(0.08f);
-        inputsCard.addView(inTitle, gapBelow(8));
+        // Peaks card.
+        peaksCard = Ui.card(this);
+        peaksCaption = Ui.caption(this, "STRONGEST PEAKS");
+        peaksCard.addView(peaksCaption, Ui.gapBelow(this, 6));
+        peakList = new PeakListView(this);
+        peakList.setListener(this::pick);
+        peaksCard.addView(peakList);
+        peaksCard.setVisibility(View.GONE);
+        shakePage.addView(peaksCard, Ui.gapBelow(this, 12));
 
-        rpmIn = field(InputType.TYPE_CLASS_NUMBER);
+        // Setup card.
+        inputsCard = Ui.card(this);
+        inputsCard.setLayoutTransition(new LayoutTransition());
+        setupHeader = Ui.caption(this, "SETUP  ▾");
+        setupHeader.setMinHeight(dp(32));
+        setupHeader.setGravity(Gravity.CENTER_VERTICAL);
+        setupHeader.setOnClickListener(v -> toggleSetup());
+        inputsCard.addView(setupHeader);
+        setupBody = new LinearLayout(this);
+        setupBody.setOrientation(LinearLayout.VERTICAL);
+        setupBody.setPadding(0, dp(8), 0, 0);
+        inputsCard.addView(setupBody);
+
+        autoBox = Ui.toggle(this, "Measure engine speed automatically", Theme.ENGINE);
+        autoBox.setOnCheckedChangeListener((b, on) -> { if (!loading) { saveInputs(); chipSignature = "?"; refresh(); } });
+        setupBody.addView(autoBox, Ui.gapBelow(this, 4));
+
+        micBox = Ui.toggle(this, "Use engine sound too (microphone)", Theme.SPEED);
+        micBox.setOnCheckedChangeListener((b, on) -> {
+            if (loading) return;
+            if (on && !granted(Manifest.permission.RECORD_AUDIO)) {
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+            } else if (on && running && measurePage == PAGE_SHAKE) {
+                mic.start(this);
+            } else if (!on) {
+                mic.stop();
+            }
+            saveInputs();
+            applySourceSwitch();
+            refresh();
+        });
+        setupBody.addView(micBox);
+        TextView micHelp = Ui.text(this, 12, Theme.MUTED, false);
+        micHelp.setText("Sound backs up the vibration reading and adds a sound chart. Nothing is recorded or sent anywhere. Best with the fan and radio off.");
+        setupBody.addView(micHelp, Ui.gapBelow(this, 8));
+
+        obdBox = Ui.toggle(this, "Exact rpm from an OBD2 adapter", Theme.OK);
+        obdBox.setOnCheckedChangeListener((b, on) -> {
+            if (loading) return;
+            if (on) {
+                connectObd(true);
+                if (prefs.getString("obdMac", "").isEmpty()) { loading = true; obdBox.setChecked(false); loading = false; }
+            } else disconnectObd();
+        });
+        setupBody.addView(obdBox, Ui.gapBelow(this, 10));
+
+        rpmIn = Ui.field(this, InputType.TYPE_CLASS_NUMBER, "e.g. 1400");
+        rpmIn.addTextChangedListener(watcher);
         rpmIn.setGravity(Gravity.CENTER);
-        LinearLayout rpmRow = new LinearLayout(this);
-        rpmRow.setOrientation(LinearLayout.HORIZONTAL);
-        rpmRow.setGravity(Gravity.CENTER_VERTICAL);
-        Button minus = button("−100");
-        Button plus = button("+100");
+        LinearLayout rpmRow = Ui.row(this);
+        TextView minus = Ui.button(this, "−100", Theme.LINE, Theme.INK);
+        TextView plus = Ui.button(this, "+100", Theme.LINE, Theme.INK);
         minus.setOnClickListener(v -> bumpRpm(-100));
         plus.setOnClickListener(v -> bumpRpm(100));
         rpmRow.addView(minus, new LinearLayout.LayoutParams(dp(84), dp(48)));
         rpmRow.addView(rpmIn, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         rpmRow.addView(plus, new LinearLayout.LayoutParams(dp(84), dp(48)));
-        inputsCard.addView(labelled("Rough engine speed from the tach (rpm)", rpmRow,
-                "Within about 30% is enough. The app measures the exact value."), gapBelow(8));
+        setupBody.addView(Ui.labelled(this, "Engine speed from the tach (rpm)", rpmRow,
+                "Only used when the app can't measure it, or when automatic is off. Leave empty otherwise."), Ui.gapBelow(this, 12));
 
-        autoBox = new CheckBox(this);
-        autoBox.setText("Measure exact rpm from the peaks");
-        autoBox.setTextColor(Theme.INK);
-        autoBox.setButtonTintList(ColorStateList.valueOf(Theme.ENGINE));
-        autoBox.setOnCheckedChangeListener((b, checked) -> { if (!loading) { saveInputs(); refresh(); } });
-        inputsCard.addView(autoBox, gapBelow(12));
+        gpsBox = Ui.toggle(this, "Road speed from GPS", Theme.SPEED);
+        gpsBox.setOnCheckedChangeListener((b, on) -> {
+            kmhRow.setVisibility(on ? View.GONE : View.VISIBLE);
+            if (loading) return;
+            saveInputs();
+            if (on) startGpsIfWanted(true); else stopGps();
+            liveSources();
+            refresh();
+        });
+        setupBody.addView(gpsBox, Ui.gapBelow(this, 4));
+        kmhIn = Ui.field(this, Ui.numberInput(), "0");
+        kmhIn.addTextChangedListener(watcher);
+        kmhRow = Ui.labelled(this, "Road speed (km/h)", kmhIn, "0 when parked in P, D or R");
+        setupBody.addView(kmhRow, Ui.gapBelow(this, 12));
 
-        kmhIn = field(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        inputsCard.addView(labelled("Road speed (km/h)", kmhIn, "0 when parked in P, D or R"), gapBelow(12));
+        tyreIn = Ui.field(this, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, "225/55R18");
+        tyreIn.addTextChangedListener(watcher);
+        setupBody.addView(Ui.labelled(this, "Tyre size", tyreIn, "Printed on the tyre sidewall, e.g. 225/55R18"), Ui.gapBelow(this, 12));
 
-        tyreIn = field(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        inputsCard.addView(labelled("Tyre size", tyreIn, "Printed on the tyre sidewall, e.g. 225/55R18"), gapBelow(12));
+        fdIn = Ui.field(this, Ui.numberInput(), "3.700");
+        fdIn.addTextChangedListener(watcher);
+        setupBody.addView(Ui.labelled(this, "Final drive ratio", fdIn, "Confirm from the service manual or ID plate"));
+        shakePage.addView(inputsCard, Ui.gapBelow(this, 12));
 
-        fdIn = field(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        inputsCard.addView(labelled("Final drive ratio", fdIn, "Confirm from the service manual or ID plate"));
-        root.addView(inputsCard, gapBelow(12));
-
-        TextView tip = text(13, Theme.MUTED, false);
+        TextView tip = Ui.text(this, 13, Theme.MUTED, false);
         tip.setText("Tip: if two parts match at once, keep the same rpm at a different road speed. Engine lines stay put; tyre and propshaft lines move.");
-        root.addView(tip);
+        shakePage.addView(tip);
+
+        // Cards rise into place when the app opens.
+        for (int i = 0; i < shakePage.getChildCount(); i++) Ui.enter(shakePage.getChildAt(i), 40L * i);
 
         updateButtons();
         return scroll;
+    }
+
+    private void toggleSetup() {
+        boolean open = setupBody.getVisibility() != View.VISIBLE;
+        setupBody.setVisibility(open ? View.VISIBLE : View.GONE);
+        setupHeader.setText(open ? "SETUP  ▴" : "SETUP  ▾");
+        prefs.edit().putBoolean("setupOpen", open).apply();
+    }
+
+    private void openSetup() {
+        if (setupBody.getVisibility() != View.VISIBLE) toggleSetup();
+        scroll.post(() -> scroll.smoothScrollTo(0, shakePage.getTop() + inputsCard.getTop()));
     }
 }
