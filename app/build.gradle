@@ -10,8 +10,8 @@ android {
         applicationId 'app.sitestamp'
         minSdk 29
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '1.1'
     }
 
     // One fixed key, so each new build installs over the previous one.

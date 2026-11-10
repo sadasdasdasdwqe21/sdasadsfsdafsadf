@@ -22,7 +22,7 @@ final class ShutterButton extends View {
     ShutterButton(Context c) {
         super(c);
         ring.setStyle(Paint.Style.STROKE);
-        ring.setColor(0xFFFFFFFF);
+        ring.setColor(Ui.TEXT);
         setClickable(true);
         setFocusable(true);
     }
@@ -54,7 +54,7 @@ final class ShutterButton extends View {
         ring.setAlpha(isEnabled() ? 255 : 110);
         c.drawCircle(cx, cy, r - w, ring);
         float inner = (r - w * 2.6f) * (down ? 0.90f : 1f);
-        fill.setColor(mode == PHOTO ? 0xFFFFFFFF : Ui.RED);
+        fill.setColor(mode == PHOTO ? Ui.TEXT : Ui.RED);
         fill.setAlpha(isEnabled() ? 255 : 110);
         if (mode == RECORDING) {
             float s = r * 0.36f;

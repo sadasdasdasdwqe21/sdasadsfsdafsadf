@@ -20,18 +20,26 @@ import java.util.List;
  */
 final class StampRenderer {
 
-    static final int POS_BOTTOM_LEFT = 0;
-    static final int POS_BOTTOM_RIGHT = 1;
-    static final int POS_TOP_LEFT = 2;
-    static final int POS_TOP_RIGHT = 3;
+    static final int START = 0;   // left, or top
+    static final int MIDDLE = 1;
+    static final int END = 2;     // right, or bottom
+
+    static final int BOX_NONE = 0;
+    static final int BOX_DARK = 1;
+    static final int BOX_LIGHT = 2;
 
     static final int ACCENT = 0xFFFFB300;
 
     static final class Style {
-        int position = POS_BOTTOM_LEFT;
+        /** Left, middle or right. */
+        int h = START;
+        /** Top, middle or bottom. */
+        int v = END;
         float scale = 1f;
         int color = 0xFFFFFFFF;
-        boolean box = true;
+        int box = BOX_DARK;
+        /** Gap to the picture's edge, as a share of the picture's short side. */
+        float margin = 0.035f;
     }
 
     private static final class Row {
@@ -52,7 +60,6 @@ final class StampRenderer {
     private final List<Row> rows = new ArrayList<>();
 
     StampRenderer() {
-        boxPaint.setColor(0x80000000);
         barPaint.setColor(ACCENT);
     }
 
@@ -100,36 +107,47 @@ final class StampRenderer {
 
     private void drawUpright(Canvas c, float uw, float uh, List<StampText.Line> lines, Style st) {
         float base = Math.min(uw, uh);
+        float margin = base * Math.max(0f, Math.min(0.2f, st.margin));
         float size = base * 0.030f * st.scale;
-        float margin = base * 0.035f;
-        float padX = size * 0.60f;
-        float padY = size * 0.50f;
-        float barW = size * 0.22f;
-        float gap = size * 0.50f;
-        float maxText = uw - 2 * margin - 2 * padX - barW - gap;
-        if (maxText < size * 4) return;
+        float padX = 0, padY = 0, barW = 0, gap = 0, boxW = 0, boxH = 0;
 
-        rows.clear();
-        for (StampText.Line line : lines) {
-            float s = sizeFor(line.role, size);
-            setPaint(line.role, s, st);
-            wrap(line.text, line.role, s, maxText);
+        // Lay the text out. If it comes out taller than the picture, shrink it and try again.
+        for (int attempt = 0; attempt < 4; attempt++) {
+            padX = size * 0.60f;
+            padY = size * 0.50f;
+            barW = size * 0.22f;
+            gap = size * 0.50f;
+            float maxText = uw - 2 * margin - 2 * padX - barW - gap;
+            if (maxText < size * 4) {
+                size *= 0.8f;
+                continue;
+            }
+            rows.clear();
+            for (StampText.Line line : lines) {
+                float s = sizeFor(line.role, size);
+                setPaint(line.role, s, st);
+                wrap(line.text, line.role, s, maxText);
+            }
+            float blockW = 0, blockH = 0;
+            for (Row row : rows) {
+                blockW = Math.max(blockW, row.width);
+                blockH += row.size * 1.30f;
+            }
+            boxW = blockW + 2 * padX + barW + gap;
+            boxH = blockH + 2 * padY;
+            float room = uh - 2 * margin;
+            if (boxH <= room || room <= 0) break;
+            size *= Math.max(0.5f, room / boxH * 0.98f);
         }
         if (rows.isEmpty()) return;
 
-        float blockW = 0, blockH = 0;
-        for (Row row : rows) {
-            blockW = Math.max(blockW, row.width);
-            blockH += row.size * 1.30f;
-        }
-        float boxW = blockW + 2 * padX + barW + gap;
-        float boxH = blockH + 2 * padY;
-        boolean right = st.position == POS_BOTTOM_RIGHT || st.position == POS_TOP_RIGHT;
-        boolean top = st.position == POS_TOP_LEFT || st.position == POS_TOP_RIGHT;
-        float left = right ? uw - margin - boxW : margin;
-        float topY = top ? margin : uh - margin - boxH;
+        boolean right = st.h == END;
+        float left = st.h == START ? margin : right ? uw - margin - boxW : (uw - boxW) / 2f;
+        float topY = st.v == START ? margin : st.v == END ? uh - margin - boxH
+                : (uh - boxH) / 2f;
 
-        if (st.box) {
+        if (st.box != BOX_NONE) {
+            boxPaint.setColor(st.box == BOX_LIGHT ? 0xD9FFFFFF : 0x80000000);
             rect.set(left, topY, left + boxW, topY + boxH);
             float rad = size * 0.40f;
             c.drawRoundRect(rect, rad, rad, boxPaint);
@@ -161,14 +179,19 @@ final class StampRenderer {
         textPaint.setTextSize(size);
         textPaint.setTypeface(role == StampText.ROLE_NORMAL ? regular : bold);
         textPaint.setColor(st.color);
-        textPaint.setShadowLayer(size * (st.box ? 0.06f : 0.14f), 0, size * 0.05f, 0xF0000000);
+        if (st.box == BOX_LIGHT) {
+            textPaint.clearShadowLayer();
+        } else {
+            textPaint.setShadowLayer(size * (st.box == BOX_DARK ? 0.06f : 0.14f), 0,
+                    size * 0.05f, 0xF0000000);
+        }
     }
 
     /** Splits one line into rows that fit, breaking at spaces where it can. */
     private void wrap(String text, int role, float size, float maxWidth) {
         String rest = text;
         int guard = 0;
-        while (!rest.isEmpty() && guard++ < 6) {
+        while (!rest.isEmpty() && guard++ < 8) {
             int n = textPaint.breakText(rest, true, maxWidth, null);
             if (n <= 0) break;
             if (n < rest.length()) {

@@ -26,6 +26,8 @@ final class IconView extends View {
     private boolean active;
     private boolean crossed;
     private String badge = "";
+    /** The colour behind the icon, used to hollow out the slider knobs. */
+    private int knobBack = Ui.BG;
 
     IconView(Context c, int kind) {
         super(c);
@@ -52,7 +54,8 @@ final class IconView extends View {
         float box = Math.min(getWidth(), getHeight()) * 0.52f;
         float u = box / 24f;
         float ox = (getWidth() - box) / 2f, oy = (getHeight() - box) / 2f;
-        int color = !isEnabled() ? 0x55FFFFFF : active ? Ui.ACCENT : 0xFFFFFFFF;
+        int color = !isEnabled() ? (Ui.TEXT & 0x00FFFFFF) | 0x55000000
+                : active ? Ui.ACCENT_TEXT : Ui.TEXT;
         stroke.setColor(color);
         stroke.setStrokeWidth(1.9f * u);
         fill.setColor(color);
@@ -106,7 +109,7 @@ final class IconView extends View {
                 c.drawLine(3.5f, 6.5f, 20.5f, 6.5f, stroke);
                 c.drawLine(3.5f, 12f, 20.5f, 12f, stroke);
                 c.drawLine(3.5f, 17.5f, 20.5f, 17.5f, stroke);
-                fill.setColor(Ui.BG);
+                fill.setColor(knobBack);
                 c.drawCircle(9, 6.5f, 2.6f, fill);
                 c.drawCircle(15.5f, 12f, 2.6f, fill);
                 c.drawCircle(8, 17.5f, 2.6f, fill);

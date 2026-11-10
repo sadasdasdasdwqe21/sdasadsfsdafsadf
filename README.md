@@ -20,7 +20,14 @@ Tap the pill to choose the project by hand for now, for example indoors where GP
 
 **Where pictures go.** `DCIM/SiteStamp/<project name>/`, one folder per project, with file names like `ZONAL OFFICE_20261110_150322.jpg`. Pictures taken away from every site go in `Other`. Each photo also carries its position, time and project name in its hidden details (EXIF).
 
-**Settings** (sliders icon): which lines the stamp shows, date and coordinate style, corner, text size and colour, photo size, video quality.
+**Settings** (sliders icon), with a sample picture at the top that changes as you choose:
+
+- Position: nine places (each corner, the middle of each side, and the centre), plus how far the stamp sits from the edge.
+- Text size: a slider from 40% to 300% in steps of 5%. If the text would not fit the picture, it is shrunk to fit.
+- Text colour, and the box behind the text: none, dark or light.
+- Which lines the stamp shows, date and coordinate style.
+- Photo size and video quality.
+- Theme: dark, light, or the same as the phone.
 
 ## How it finds the project
 

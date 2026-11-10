@@ -5,7 +5,6 @@ import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.graphics.Color;
 import android.location.Location;
 import android.net.Uri;
 import android.os.Bundle;
@@ -36,9 +35,9 @@ public final class ProjectsActivity extends Activity implements LocationTracker.
 
     @Override
     protected void onCreate(Bundle state) {
+        Ui.applyTheme(this);
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.BLACK);
-        getWindow().setNavigationBarColor(Color.BLACK);
+        Ui.applyBars(this);
         store = new ProjectStore(this);
         projects = store.load();
         tracker = new LocationTracker(this, this);
@@ -123,7 +122,7 @@ public final class ProjectsActivity extends Activity implements LocationTracker.
     private void updateGpsLine() {
         if (!LocationTracker.hasPermission(this)) {
             gpsLine.setText("Location is not allowed for this app, so sites cannot be detected.");
-            gpsLine.setTextColor(Ui.ACCENT);
+            gpsLine.setTextColor(Ui.ACCENT_TEXT);
         } else if (here == null) {
             gpsLine.setText(tracker.isGpsOn() ? "Finding your position…"
                     : "Phone location is switched off.");
@@ -248,7 +247,7 @@ public final class ProjectsActivity extends Activity implements LocationTracker.
                 "-2.516400, 32.917500", InputType.TYPE_CLASS_TEXT);
         openCoords = coords;
 
-        TextView useHere = Ui.text(this, "Use where I am now", 14, Ui.ACCENT, true);
+        TextView useHere = Ui.text(this, "Use where I am now", 14, Ui.ACCENT_TEXT, true);
         useHere.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
         useHere.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -261,7 +260,7 @@ public final class ProjectsActivity extends Activity implements LocationTracker.
             }
         });
         form.addView(useHere);
-        TextView onMap = Ui.text(this, "Check this point on a map", 14, Ui.ACCENT, true);
+        TextView onMap = Ui.text(this, "Check this point on a map", 14, Ui.ACCENT_TEXT, true);
         onMap.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
         onMap.setOnClickListener(new View.OnClickListener() {
             @Override

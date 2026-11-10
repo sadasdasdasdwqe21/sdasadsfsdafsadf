@@ -103,6 +103,8 @@ public final class MainActivity extends ComponentActivity
     private Uri lastUri;
     private String lastMime = "image/jpeg";
     private Runnable messageAction;
+    /** The theme setting this screen was built with. */
+    private int builtTheme;
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -139,10 +141,10 @@ public final class MainActivity extends ComponentActivity
 
     @Override
     protected void onCreate(Bundle state) {
+        builtTheme = Ui.applyTheme(this);
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        getWindow().setStatusBarColor(Color.BLACK);
-        getWindow().setNavigationBarColor(Color.BLACK);
+        Ui.applyBars(this);
 
         prefs = new Prefs(this);
         store = new ProjectStore(this);
@@ -192,7 +194,7 @@ public final class MainActivity extends ComponentActivity
 
     private View buildScreen() {
         LinearLayout root = Ui.column(this);
-        root.setBackgroundColor(Color.BLACK);
+        root.setBackgroundColor(Ui.BG);
 
         // Top row of icons.
         LinearLayout top = Ui.row(this);
@@ -222,7 +224,7 @@ public final class MainActivity extends ComponentActivity
         stage.addView(frame, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
 
-        chip = Ui.text(this, "", 13, Ui.TEXT, true);
+        chip = Ui.text(this, "", 13, Ui.PIC_TEXT, true);
         chip.setBackground(Ui.round(0xB3000000, Ui.dp(this, 18)));
         chip.setPadding(Ui.dp(this, 14), Ui.dp(this, 8), Ui.dp(this, 14), Ui.dp(this, 8));
         chip.setMaxLines(2);
@@ -472,6 +474,11 @@ public final class MainActivity extends ComponentActivity
     @Override
     protected void onResume() {
         super.onResume();
+        if (prefs.getI(Prefs.THEME, Ui.THEME_DARK) != builtTheme) {
+            // The theme was changed in Settings: build this screen again in the new colours.
+            recreate();
+            return;
+        }
         options = prefs.options();
         style = prefs.style();
         projects = store.load();
@@ -632,8 +639,8 @@ public final class MainActivity extends ComponentActivity
         frame.setRatio(videoMode ? 9f / 16f : 3f / 4f);
         overlay.setShowStamp(!videoMode);
         shutter.setMode(videoMode ? ShutterButton.VIDEO : ShutterButton.PHOTO);
-        modePhoto.setTextColor(videoMode ? Ui.DIM : Ui.ACCENT);
-        modeVideo.setTextColor(videoMode ? Ui.ACCENT : Ui.DIM);
+        modePhoto.setTextColor(videoMode ? Ui.DIM : Ui.ACCENT_TEXT);
+        modeVideo.setTextColor(videoMode ? Ui.ACCENT_TEXT : Ui.DIM);
     }
 
     private void updateIcons() {
@@ -730,7 +737,7 @@ public final class MainActivity extends ComponentActivity
 
     private void updateChip() {
         String text;
-        int color = Ui.TEXT;
+        int color = Ui.PIC_TEXT;
         if (!LocationTracker.hasPermission(this)) {
             text = "Location is off. Tap to allow it";
             color = Ui.ACCENT;
@@ -743,10 +750,10 @@ public final class MainActivity extends ComponentActivity
         } else if (!fix.has) {
             text = tracker.isGpsOn() ? "Finding your position…"
                     : "Phone location is switched off";
-            color = Ui.DIM;
+            color = Ui.PIC_DIM;
         } else if (match != null && match.project != null) {
             text = "●  " + match.project.name + "  ·  on site";
-            color = Ui.GREEN;
+            color = Ui.PIC_GREEN;
         } else if (match != null && match.nearest != null) {
             text = "Not on a site  ·  " + match.nearest.name + " is "
                     + Geo.distanceLabel(match.nearestM) + " away";
@@ -759,8 +766,7 @@ public final class MainActivity extends ComponentActivity
 
     /** Keeps the chip away from the corner the stamp is in. */
     private void placeChip() {
-        boolean stampOnTop = style.position == StampRenderer.POS_TOP_LEFT
-                || style.position == StampRenderer.POS_TOP_RIGHT;
+        boolean stampOnTop = style.v == StampRenderer.START;
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) chip.getLayoutParams();
         lp.gravity = (stampOnTop ? Gravity.BOTTOM : Gravity.TOP) | Gravity.CENTER_HORIZONTAL;
         chip.setLayoutParams(lp);
