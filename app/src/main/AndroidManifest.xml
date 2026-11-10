@@ -39,5 +39,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Hands one saved file to the app the user shares it with. Private otherwise. -->
+        <provider
+            android:name=".ShareProvider"
+            android:authorities="app.shakefinder.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

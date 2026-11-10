@@ -60,6 +60,11 @@ public class SpectrumView extends View {
     private String emptyHint = "";
     private int curveColor = Theme.INK;
 
+    // A second curve drawn behind the main one, for comparing two saved readings.
+    private double[] ghost;
+    private double ghostDf = 0;
+    private int ghostCount = 0, ghostColor = Theme.ENGINE;
+
     // What is on screen right now (animated toward the targets).
     private float[] shown;
     private double fMaxTarget = 100, fMax = 100;
@@ -127,6 +132,14 @@ public class SpectrumView extends View {
         listener = l;
     }
 
+    /** A second curve to compare against, in the same units. Call before setPlot. Null removes it. */
+    public void setGhost(double df, double[] values, int count, int color) {
+        ghost = values;
+        ghostDf = df;
+        ghostCount = values == null ? 0 : count;
+        ghostColor = color;
+    }
+
     /**
      * @param df        Hz per element of values
      * @param values    the curve in plot units (mg, or dB when decibels is true); null clears the chart
@@ -157,6 +170,9 @@ public class SpectrumView extends View {
             double hi = -1e9;
             int kStart = Math.max(1, (int) Math.ceil(3 / df));
             for (int k = kStart; k < count && k * df <= fMaxTarget; k++) hi = Math.max(hi, values[k]);
+            if (ghost != null && ghostDf > 0) {
+                for (int k = Math.max(1, (int) Math.ceil(3 / ghostDf)); k < ghostCount && k * ghostDf <= fMaxTarget; k++) hi = Math.max(hi, ghost[k]);
+            }
             if (decibels) {
                 double top = Math.ceil((hi + 6) / 10) * 10;
                 // rise at once, sink slowly, so the scale doesn't pump
@@ -345,6 +361,20 @@ public class SpectrumView extends View {
             c.drawText(fmt((yHi + yLo) / 2), left + 4 * dp, mid - 3 * dp, axisText);
         }
         c.drawText("Hz", right - axisText.measureText("Hz"), bottom - 4 * dp, axisText);
+
+        // The comparison curve sits behind the main one.
+        if (ghost != null && ghostDf > 0 && shown != null) {
+            path.reset();
+            boolean started = false;
+            for (int i = 0; i < ghostCount; i++) {
+                double f = i * ghostDf;
+                if (f > fMax) break;
+                float x = xOf(f), y = yOf(ghost[i], top, bottom);
+                if (!started) { path.moveTo(x, y); started = true; } else path.lineTo(x, y);
+            }
+            specLine.setColor(Theme.alpha(ghostColor, 220));
+            c.drawPath(path, specLine);
+        }
 
         // Curve.
         if (shown != null && values != null) {

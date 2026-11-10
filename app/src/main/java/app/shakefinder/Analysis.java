@@ -307,6 +307,24 @@ public final class Analysis {
         return out;
     }
 
+    /**
+     * Strength of the tone nearest a given frequency, in m/s². Looks within
+     * relTol either side (never less than one and a half bins). Returns 0 when
+     * nothing there stands at least 3 times above the noise.
+     */
+    public static double ampNear(Spectrum sp, double hz, double relTol) {
+        if (sp == null || !(hz > 0)) return 0;
+        double[] a = sp.amp;
+        double w = Math.max(1.5 * sp.df, relTol * hz);
+        int kLo = Math.max(1, (int) Math.floor((hz - w) / sp.df));
+        int kHi = Math.min(a.length - 2, (int) Math.ceil((hz + w) / sp.df));
+        if (kHi < kLo) return 0;
+        int kb = kLo;
+        for (int k = kLo; k <= kHi; k++) if (a[k] > a[kb]) kb = k;
+        double amp = a[kb] / hannGain(hannOffset(a[kb - 1], a[kb], a[kb + 1]));
+        return amp >= 3 * sp.floor ? amp : 0;
+    }
+
     /** In-place iterative radix-2 FFT. Length must be a power of two. */
     static void fft(double[] re, double[] im) {
         int n = re.length;

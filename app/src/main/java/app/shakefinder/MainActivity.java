@@ -10,6 +10,7 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -41,14 +42,22 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
 public class MainActivity extends Activity
-        implements SensorEventListener, LocationListener, ObdLink.Listener, ObdPage.Host {
+        implements SensorEventListener, LocationListener, ObdLink.Listener, ObdPage.Host, SavedPage.Host {
 
     private static final int CAP = 16384;            // ring buffer: ~30 s at 500 Hz
     private static final double SLOW_WIN = 5.2;      // seconds behind the chart and the verdict
@@ -57,7 +66,9 @@ public class MainActivity extends Activity
     private static final double TAP_WIN = 4.0;
     private static final long UPDATE_MS = 250;
     private static final double G = 9.80665;
-    private static final int PAGE_SHAKE = 0, PAGE_TAP = 1, PAGE_OBD = 2;
+    private static final int PAGE_SHAKE = 0, PAGE_TAP = 1, PAGE_OBD = 2, PAGE_SAVED = 3;
+    private static final double MAX_RECORD_S = 1800; // a forgotten recording stops itself after half an hour
+    private static final int[] SWEEP_ORDER = {SweepMap.PEAK, 2, 3, 1, 0}; // All, 2E, 4E, 1E, ½E
     private static final int REQ_LOCATION = 1, REQ_MIC = 2, REQ_BT = 3;
 
     private enum RpmSrc { NONE, VIB, VIB_SOUND, SOUND, LOCKED, OBD, ENGINE_OFF, TYPED }
@@ -105,6 +116,22 @@ public class MainActivity extends Activity
     private String chipSignature = "";
     private String verdictSignature = "";
 
+    // Recording a run.
+    private final Recorder recorder = new Recorder();
+    private String recBase;
+    private long recTimeMs;
+    private List<Integer> obdPids = new ArrayList<>();
+    private int[] recPids = new int[0];
+    private final HashMap<Integer, double[]> obdLatest = new HashMap<>(); // pid -> {value, time}
+    private int sweepSeries = SweepMap.PEAK;
+
+    // What is on screen, kept so "Save this reading" can store exactly that.
+    private List<Orders.Source> lastSrc = new ArrayList<>();
+    private List<Analysis.Peak> lastPeaks = new ArrayList<>();
+    private boolean lastSoundView = false;
+    private double lastFTop = 100;
+    private String lastChip = "", lastTitle = "", lastWhat = "", lastCheck = "";
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -121,8 +148,12 @@ public class MainActivity extends Activity
     private final android.graphics.drawable.GradientDrawable liveDotBg = new android.graphics.drawable.GradientDrawable();
     private boolean showSound = false, loading = false;
     private ScrollView scroll;
-    private LinearLayout shakePage, gaugeRow, chipRow, setupBody, legend, inputsCard, peaksCard;
+    private LinearLayout shakePage, gaugeRow, chipRow, setupBody, legend, inputsCard, peaksCard, sweepCard;
     private ObdPage obdPage;
+    private SavedPage savedPage;
+    private SweepView sweepView;
+    private TextView recBtn, saveBtn, sweepText;
+    private ObjectAnimator recPulse;
     private SegmentView pageSwitch, sourceSwitch;
     private GaugeView rpmGaugeView, speedGaugeView;
     private SpectrumView spectrumView;
@@ -173,6 +204,7 @@ public class MainActivity extends Activity
         stopMeasuring();
         stopGps();
         if (link != null) link.stop();
+        if (savedPage != null) savedPage.stopAudio();
         handler.removeCallbacks(tick);
     }
 
@@ -180,7 +212,9 @@ public class MainActivity extends Activity
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacksAndMessages(null);
+        recorder.stop();
         mic.stop();
+        if (savedPage != null) savedPage.stopAudio();
         if (obdPage != null) obdPage.stop();
         if (sensorThread != null) sensorThread.quitSafely();
     }
@@ -238,6 +272,7 @@ public class MainActivity extends Activity
 
     private void stopMeasuring() {
         if (!running) return;
+        if (recorder.isRecording()) stopRecording();
         running = false;
         frozen = false;
         if (sensorManager != null) sensorManager.unregisterListener(this);
@@ -305,7 +340,248 @@ public class MainActivity extends Activity
         }
         updateSpeed(now);
         updateRpm(now, fast, fastPeaks);
+        if (recorder.isRecording()) recordTick(now, fast, fastPeaks);
         refresh();
+    }
+
+    // ---------------------------------------------------------------- recording
+
+    private void toggleRecording() {
+        if (recorder.isRecording()) {
+            stopRecording();
+            updateButtons();
+            refresh();
+            return;
+        }
+        if (measurePage != PAGE_SHAKE) return;
+        if (!running) startMeasuring();
+        if (!running) return; // no accelerometer
+        frozen = false;
+        recBase = "run_" + Store.stamp();
+        recTimeMs = System.currentTimeMillis();
+        File dir = Store.dir(this);
+        // One column per OBD value the car reports, if the adapter is live.
+        List<String> names = new ArrayList<>();
+        List<Integer> ids = new ArrayList<>();
+        if (link != null && link.isLive()) {
+            for (int id : obdPids) {
+                Elm327.Pid p = Elm327.pid(id);
+                if (p == null || id == 0x0C || id == 0x0D) continue;
+                ids.add(id);
+                names.add("obd_" + p.name.toLowerCase(Locale.US).replaceAll("[^a-z0-9]+", "_") + (p.unit.isEmpty() ? "" : "_" + p.unit.replace("°", "deg").replace("λ", "lambda").replace("/", "_per_")));
+            }
+            link.setLiveAll(true); // log every value, not just the few the shake screen needs
+        }
+        recPids = new int[ids.size()];
+        for (int i = 0; i < recPids.length; i++) recPids[i] = ids.get(i);
+        try {
+            recorder.start(new File(dir, recBase + ".csv"), names.toArray(new String[0]));
+        } catch (IOException e) {
+            Toast.makeText(this, "Couldn't start recording: the phone's storage isn't writable.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (mic.isRunning()) {
+            mic.recordTo(new File(dir, recBase + ".wav"));
+        } else {
+            Toast.makeText(this, "Recording without sound. To save engine sound too, tap Engine sound above the chart first.", Toast.LENGTH_LONG).show();
+        }
+        sweepCard.setVisibility(View.VISIBLE);
+        updateButtons();
+        refresh();
+    }
+
+    private void recordTick(double now, Analysis.Spectrum fast, List<Analysis.Peak> fastPeaks) {
+        // Engine speed over the same two seconds the strengths are measured over.
+        double rpm = rpmSrc == RpmSrc.OBD ? obdRpm.mean(now, FAST_WIN) : rpmValue;
+        boolean measured = rpmSrc != RpmSrc.TYPED && rpmSrc != RpmSrc.NONE && rpmSrc != RpmSrc.ENGINE_OFF;
+        double[] orderMg = null;
+        double tyreMg = Double.NaN, propMg = Double.NaN, peakHz = Double.NaN, peakMg = Double.NaN;
+        String match = "";
+        if (fast != null) {
+            if (!Double.isNaN(rpm) && rpm > 0) {
+                orderMg = new double[4];
+                for (int i = 0; i < 4; i++) orderMg[i] = Analysis.ampNear(fast, SweepMap.ORDERS[i] * rpm / 60.0, 0.02) / G * 1000;
+            }
+            double[] road = kmhValue > 0 ? Orders.roadFrequencies(kmhValue, tyreIn.getText().toString(), num(fdIn)) : new double[0];
+            if (road.length >= 1) tyreMg = Analysis.ampNear(fast, road[0], 0.035) / G * 1000;
+            if (road.length >= 3) propMg = Analysis.ampNear(fast, road[2], 0.035) / G * 1000;
+            if (!fastPeaks.isEmpty()) {
+                Analysis.Peak top = fastPeaks.get(0);
+                peakHz = top.hz;
+                peakMg = top.amp / G * 1000;
+                Orders.Source m = Orders.bestMatch(lastSrc, top.hz, fast.df);
+                match = m == null ? "" : m.shortName;
+            }
+        }
+        double[] obd = new double[recPids.length];
+        for (int i = 0; i < obd.length; i++) {
+            double[] v = obdLatest.get(recPids[i]);
+            obd[i] = v != null && now - v[1] < 5 ? v[0] : Double.NaN;
+        }
+        try {
+            recorder.row(now, rpm, rpmSourceName(), kmhValue, speedSrc.name().toLowerCase(Locale.US),
+                    peakHz, peakMg, match, orderMg, tyreMg, propMg,
+                    sound != null && mic.isRunning() ? sound.levelDb : Double.NaN, obd,
+                    measured && !rpmHolding && orderMg != null);
+        } catch (IOException e) {
+            stopRecording();
+            Toast.makeText(this, "Recording stopped: the phone's storage is full or not writable.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (recorder.seconds() > MAX_RECORD_S) stopRecording();
+        updateButtons();
+    }
+
+    private String rpmSourceName() {
+        switch (rpmSrc) {
+            case OBD: return "obd";
+            case VIB: return "vibration";
+            case VIB_SOUND: return "vibration+sound";
+            case SOUND: return "sound";
+            case LOCKED: return "locked";
+            case TYPED: return "typed";
+            case ENGINE_OFF: return "engine_off";
+            default: return "";
+        }
+    }
+
+    private void stopRecording() {
+        if (!recorder.isRecording()) return;
+        recorder.stop();
+        File wav = new File(Store.dir(this), recBase + ".wav");
+        boolean hadSound = mic.wavSeconds() > 0.5;
+        mic.recordTo(null);
+        if (link != null) link.setLiveAll(page == PAGE_OBD);
+        if (recorder.rows() < 4) { // a mis-tap: nothing worth keeping
+            if (recorder.file() != null) recorder.file().delete();
+            wav.delete();
+            Toast.makeText(this, "Too short to save.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!hadSound) wav.delete();
+        try {
+            JSONObject o = new JSONObject();
+            o.put("type", "run").put("time", recTimeMs).put("note", "");
+            o.put("seconds", Math.round(recorder.seconds() * 10) / 10.0).put("rows", recorder.rows());
+            o.put("obdColumns", recPids.length).put("hasWav", hadSound);
+            if (!Double.isNaN(recorder.rpmMin())) o.put("rpmMin", Math.round(recorder.rpmMin())).put("rpmMax", Math.round(recorder.rpmMax()));
+            o.put("maxMg", Math.round(recorder.maxMg() * 100) / 100.0);
+            if (!Double.isNaN(recorder.maxHz())) o.put("maxHz", Math.round(recorder.maxHz() * 100) / 100.0);
+            if (!Double.isNaN(recorder.maxRpm())) o.put("maxRpm", Math.round(recorder.maxRpm()));
+            o.put("maxTag", recorder.maxTag());
+            if (!recorder.sweep.isEmpty()) {
+                JSONObject sw = new JSONObject();
+                sw.put("firstBin", recorder.sweep.firstBin()).put("binRpm", SweepMap.BIN).put("lowRpm", SweepMap.LO);
+                for (int i = 0; i < SweepMap.SERIES; i++) sw.put(SweepMap.KEYS[i], Store.array(recorder.sweep.slice(i)));
+                o.put("sweep", sw);
+            }
+            Store.write(new File(Store.dir(this), recBase + ".json"), o.toString());
+            Toast.makeText(this, "Run saved. Open the Saved tab to see or share it.", Toast.LENGTH_LONG).show();
+        } catch (JSONException | IOException e) {
+            Toast.makeText(this, "The run's log was written, but its summary couldn't be saved.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Asks for a note, then keeps what is on screen right now. */
+    private void saveReading() {
+        final boolean soundView = lastSoundView;
+        if ((soundView && sound == null) || (!soundView && slow == null)) {
+            Toast.makeText(this, "Nothing to save yet. Press Start first.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final EditText note = Ui.field(this, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, "e.g. before new bracket, in R, brake held");
+        note.setTypeface(android.graphics.Typeface.DEFAULT);
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(dp(20), dp(8), dp(20), 0);
+        box.addView(note, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // Take the snapshot now, so the reading saved is the one that was showing when the button was pressed.
+        final JSONObject snap;
+        try {
+            snap = snapshotReading(soundView);
+        } catch (JSONException e) {
+            Toast.makeText(this, "That reading couldn't be saved.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Save this reading")
+                .setMessage("Add a note so you know later what this was.")
+                .setView(box)
+                .setPositiveButton("Save", (d, w) -> {
+                    try {
+                        snap.put("note", note.getText().toString().trim());
+                        Store.write(new File(Store.dir(this), "reading_" + Store.stamp() + ".json"), snap.toString());
+                        Toast.makeText(this, "Saved. Open the Saved tab to see or compare it.", Toast.LENGTH_LONG).show();
+                    } catch (JSONException | IOException e) {
+                        Toast.makeText(this, "That reading couldn't be saved.", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private JSONObject snapshotReading(boolean soundView) throws JSONException {
+        JSONObject o = new JSONObject();
+        o.put("type", "reading").put("time", System.currentTimeMillis());
+        o.put("mode", measurePage == PAGE_TAP ? "tap" : soundView ? "sound" : "engine");
+        o.put("chip", lastChip).put("title", lastTitle).put("what", lastWhat).put("check", lastCheck);
+        if (!Double.isNaN(rpmValue) && measurePage != PAGE_TAP) o.put("rpm", Math.round(rpmValue)).put("rpmSource", rpmSourceName());
+        if (!Double.isNaN(kmhValue)) o.put("kmh", Math.round(kmhValue * 10) / 10.0);
+        o.put("tyre", tyreIn.getText().toString()).put("fd", num(fdIn));
+        o.put("fTop", lastFTop);
+        double df;
+        if (soundView) {
+            df = sound.df;
+            int n = Math.min(sound.amp.length, (int) Math.ceil(SoundRpm.F_HI / df) + 1);
+            double[] db = new double[n];
+            for (int k = 0; k < n; k++) db[k] = sound.db(k);
+            o.put("unit", "dB").put("df", df).put("values", Store.array(db, n, 1));
+        } else {
+            df = slow.df;
+            int n = Math.min(slow.amp.length, (int) Math.ceil(Math.min(200, slow.fs / 2) / df) + 1);
+            double[] mg = new double[n];
+            for (int k = 0; k < n; k++) mg[k] = slow.amp[k] / G * 1000;
+            o.put("unit", "mg").put("df", df).put("values", Store.array(mg, n, 2));
+        }
+        JSONArray peaks = new JSONArray();
+        for (int i = 0; i < Math.min(8, lastPeaks.size()); i++) {
+            Analysis.Peak p = lastPeaks.get(i);
+            Orders.Source m = measurePage == PAGE_TAP ? null : Orders.bestMatch(lastSrc, p.hz, df);
+            JSONObject jp = new JSONObject();
+            jp.put("hz", Math.round(p.hz * 100) / 100.0).put("tag", m == null ? "–" : m.shortName);
+            if (soundView) {
+                double above = 20 * Math.log10(p.amp);
+                jp.put("v", Math.round(above * 10) / 10.0).put("y", Math.round(peakDb(p) * 10) / 10.0)
+                        .put("text", String.format(Locale.US, "+%.0f dB", above));
+            } else {
+                double mg = p.amp / G * 1000;
+                jp.put("v", Math.round(mg * 100) / 100.0).put("y", Math.round(mg * 100) / 100.0)
+                        .put("text", String.format(Locale.US, "%.1f mg", mg));
+            }
+            peaks.put(jp);
+        }
+        o.put("peaks", peaks);
+        return o;
+    }
+
+    @Override
+    public void savedShare(File f) {
+        try {
+            android.net.Uri uri = ShareProvider.uriFor(f);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(ShareProvider.mime(f.getName()));
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.putExtra(Intent.EXTRA_SUBJECT, "Shake Finder " + f.getName());
+            send.setClipData(ClipData.newRawUri(f.getName(), uri));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(send, "Share " + f.getName()));
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "No app on this phone can take that file.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    public void savedScrollTop() {
+        scroll.post(() -> scroll.smoothScrollTo(0, 0));
     }
 
     /** Between measurements the gauges still follow GPS and OBD. */
@@ -455,7 +731,11 @@ public class MainActivity extends Activity
             }
         }
 
+        lastSrc = src;
+        lastPeaks = peaks;
+        lastSoundView = soundView;
         drawChart(soundView, src, peaks, subject, plotDf);
+        updateSweep();
         updateStatus();
         updateGauges(now);
         updateChips(now);
@@ -465,6 +745,20 @@ public class MainActivity extends Activity
         else if (soundView) showSoundResult(src, subject);
         else showEngineResult(src, subject, df);
         updatePeakList(soundView, tap, src, peaks, subject, plotDf);
+    }
+
+    private void updateSweep() {
+        boolean show = measurePage == PAGE_SHAKE && (recorder.isRecording() || !recorder.sweep.isEmpty());
+        sweepCard.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) return;
+        sweepView.setData(recorder.sweep, sweepSeries, running ? rpmValue : Double.NaN, recorder.isRecording());
+        String t = recorder.sweep.worstText(sweepSeries);
+        if (t.isEmpty()) {
+            t = !recorder.isRecording() ? "Nothing at this order during the run."
+                    : Double.isNaN(rpmValue) ? "Waiting for an engine speed reading…"
+                    : "Recording. Rev slowly through the range where it shakes.";
+        }
+        sweepText.setText(t);
     }
 
     private void drawChart(boolean soundView, List<Orders.Source> src, List<Analysis.Peak> peaks,
@@ -490,6 +784,7 @@ public class MainActivity extends Activity
             double fTop = Double.isNaN(rpmValue) ? 400 : Math.max(240, Math.min(SoundRpm.F_HI, rpmValue / 60 * 8.8));
             if (subject != null) fTop = Math.max(fTop, Math.min(SoundRpm.F_HI, subject.hz * 1.2));
             fTop = Math.ceil(fTop / 100) * 100;
+            lastFTop = fTop;
             spectrumView.setPlot(sound.df, db, n, true, "dB", Theme.SPEED, fTop, src, marks, selHz, live, "");
             return;
         }
@@ -513,6 +808,7 @@ public class MainActivity extends Activity
         topF = Math.min(topF, Math.min(200, slow.fs / 2));
         double step = topF > 120 ? 40 : 20;
         topF = Math.min(Math.max(step, Math.ceil(topF / step) * step), slow.fs / 2);
+        lastFTop = topF;
         spectrumView.setPlot(slow.df, mg, mg.length, false, "mg", Theme.INK, topF, src, marks, selHz, live, "");
     }
 
@@ -668,7 +964,10 @@ public class MainActivity extends Activity
     }
 
     private void setVerdict(String chipText, int chipColor, String title, String what, String check, String note, double mg) {
-        String sig = chipText + "|" + title;
+        lastChip = chipText;
+        lastTitle = title;
+        lastWhat = what;
+        lastCheck = check;
         chip.setText(chipText);
         chip.setTextColor(chipColor);
         resultTitle.setText(title);
@@ -1089,12 +1388,16 @@ public class MainActivity extends Activity
         if (pid == 0x0C) obdRpm.add(tSec, value);
         else if (pid == 0x0D) obdSpeed.add(tSec, value);
         else if (pid == 0x04) obdLoad.add(tSec, value);
+        obdLatest.put(pid, new double[]{value, tSec});
         obdPage.onValue(pid, value);
         if (pid == 0x0C && !running) liveSources();
     }
 
     @Override public void onObdInfo(String adapter, String protocol, double volts) { obdPage.setInfo(adapter, protocol, volts); }
-    @Override public void onObdSupported(List<Integer> pids) { obdPage.setSupported(pids); }
+    @Override public void onObdSupported(List<Integer> pids) {
+        obdPids = new ArrayList<>(pids);
+        obdPage.setSupported(pids);
+    }
     @Override public void onObdCodes(ObdLink.Codes codes) { obdPage.setCodes(codes); }
     @Override public void onObdFreeze(ObdLink.Freeze freeze) { obdPage.setFreeze(freeze); }
     @Override public void onObdCleared(boolean ok) { obdPage.setCleared(ok); }
@@ -1152,7 +1455,7 @@ public class MainActivity extends Activity
 
     private void setPage(int p) {
         if (page == p) return;
-        if (p != PAGE_OBD && p != measurePage) {
+        if ((p == PAGE_SHAKE || p == PAGE_TAP) && p != measurePage) {
             // Engine and Tap test measure differently: start clean.
             stopMeasuring();
             slow = null;
@@ -1170,24 +1473,28 @@ public class MainActivity extends Activity
     }
 
     private void applyPage(boolean animate) {
-        boolean obd = page == PAGE_OBD, tap = measurePage == PAGE_TAP;
-        shakePage.setVisibility(obd ? View.GONE : View.VISIBLE);
+        boolean obd = page == PAGE_OBD, saved = page == PAGE_SAVED, tap = measurePage == PAGE_TAP;
+        shakePage.setVisibility(obd || saved ? View.GONE : View.VISIBLE);
         obdPage.root.setVisibility(obd ? View.VISIBLE : View.GONE);
+        savedPage.root.setVisibility(saved ? View.VISIBLE : View.GONE);
+        if (saved) savedPage.reload(); else savedPage.stopAudio();
+        recBtn.setVisibility(tap ? View.GONE : View.VISIBLE);
         gaugeRow.setVisibility(tap ? View.GONE : View.VISIBLE);
         inputsCard.setVisibility(tap ? View.GONE : View.VISIBLE);
         legend.setVisibility(tap ? View.GONE : View.VISIBLE);
         if (tap) chipRow.setVisibility(View.GONE);
         chipSignature = "?";
         applySourceSwitch();
-        intro.setText(obd ? "Live data, fault codes and exact rpm from the engine computer."
+        intro.setText(saved ? "Your saved readings and recorded runs."
+                : obd ? "Live data, fault codes and exact rpm from the engine computer."
                 : tap ? "Tap test: finds the frequency a part rings at. Engine off."
                 : "Measures the shake, then names the part that turns at that frequency.");
-        if (link != null) link.setLiveAll(obd);
+        if (link != null) link.setLiveAll(obd || recorder.isRecording());
         // Keep the screen awake on the live-data tab, like while measuring.
         if (obd) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else if (!running) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if (animate) {
-            Ui.enter(obd ? obdPage.root : shakePage, 0);
+            Ui.enter(saved ? savedPage.root : obd ? obdPage.root : shakePage, 0);
             scroll.smoothScrollTo(0, 0);
         }
     }
@@ -1207,6 +1514,20 @@ public class MainActivity extends Activity
         freezeBtn.setEnabled(running);
         freezeBtn.setAlpha(running ? 1f : 0.4f);
         freezeBtn.setText(frozen ? "Resume" : "Freeze");
+        boolean rec = recorder.isRecording();
+        if (rec) {
+            int sec = (int) recorder.seconds();
+            recBtn.setText(String.format(Locale.US, "■ %d:%02d", sec / 60, sec % 60));
+            if (!recPulse.isStarted()) {
+                Ui.paint(recBtn, Theme.BAD, Theme.BG);
+                recPulse.start();
+            }
+        } else if (recPulse.isStarted() || !"● Rec".contentEquals(recBtn.getText())) {
+            recPulse.cancel();
+            recBtn.setAlpha(1f);
+            recBtn.setText("● Rec");
+            Ui.paint(recBtn, Theme.alpha(Theme.BAD, 40), Theme.BAD);
+        }
         if (running && !frozen) {
             if (!startPulse.isStarted()) startPulse.start();
         } else {
@@ -1238,7 +1559,7 @@ public class MainActivity extends Activity
         intro = Ui.text(this, 14, Theme.MUTED, false);
         root.addView(intro, Ui.gapBelow(this, 12));
 
-        pageSwitch = new SegmentView(this, "Engine", "Tap test", "OBD2");
+        pageSwitch = new SegmentView(this, "Engine", "Tap test", "OBD2", "Saved");
         pageSwitch.setListener(this::setPage);
         root.addView(pageSwitch, Ui.gapBelow(this, 12));
 
@@ -1248,6 +1569,9 @@ public class MainActivity extends Activity
         root.addView(shakePage);
         obdPage = new ObdPage(this, this);
         root.addView(obdPage.root);
+        savedPage = new SavedPage(this, this);
+        savedPage.root.setVisibility(View.GONE);
+        root.addView(savedPage.root);
 
         // Gauges.
         gaugeRow = new LinearLayout(this);
@@ -1337,8 +1661,20 @@ public class MainActivity extends Activity
         startBtn.setTextSize(17);
         freezeBtn = Ui.button(this, "Freeze", Theme.LINE, Theme.INK);
         freezeBtn.setTextSize(17);
+        recBtn = Ui.button(this, "● Rec", Theme.alpha(Theme.BAD, 40), Theme.BAD);
+        recBtn.setTextSize(17);
+        recBtn.setContentDescription("Record a test run");
+        recBtn.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            toggleRecording();
+        });
+        recPulse = ObjectAnimator.ofFloat(recBtn, "alpha", 1f, 0.55f);
+        recPulse.setDuration(600);
+        recPulse.setRepeatMode(ValueAnimator.REVERSE);
+        recPulse.setRepeatCount(ValueAnimator.INFINITE);
         btnRow.addView(startBtn, Ui.weight(this, 54, 0));
-        btnRow.addView(freezeBtn, Ui.weight(this, 54, 10));
+        btnRow.addView(freezeBtn, Ui.weight(this, 54, 8));
+        btnRow.addView(recBtn, Ui.weight(this, 54, 8));
         startBtn.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             if (running) stopMeasuring(); else startMeasuring();
@@ -1357,6 +1693,22 @@ public class MainActivity extends Activity
         startPulse.setRepeatCount(ValueAnimator.INFINITE);
         shakePage.addView(btnRow, Ui.gapBelow(this, 12));
 
+        // Shake against rpm, filled in while a run is being recorded.
+        sweepCard = Ui.card(this);
+        sweepCard.addView(Ui.caption(this, "SHAKE AGAINST RPM"), Ui.gapBelow(this, 6));
+        sweepText = Ui.text(this, 15, Theme.INK, true);
+        sweepCard.addView(sweepText, Ui.gapBelow(this, 6));
+        sweepView = new SweepView(this);
+        sweepCard.addView(sweepView, Ui.gapBelow(this, 8));
+        SegmentView sweepPick = new SegmentView(this, "All", "2E", "4E", "1E", "½E");
+        sweepPick.setListener(i -> {
+            sweepSeries = SWEEP_ORDER[i];
+            updateSweep();
+        });
+        sweepCard.addView(sweepPick);
+        sweepCard.setVisibility(View.GONE);
+        shakePage.addView(sweepCard, Ui.gapBelow(this, 12));
+
         // Verdict card.
         LinearLayout res = Ui.card(this);
         res.setLayoutTransition(new LayoutTransition());
@@ -1373,7 +1725,13 @@ public class MainActivity extends Activity
         res.addView(resultCheck, Ui.gapBelow(this, 8));
         resultNote = Ui.text(this, 12.5f, Theme.MUTED, false);
         resultNote.setTypeface(Theme.MONO);
-        res.addView(resultNote);
+        res.addView(resultNote, Ui.gapBelow(this, 10));
+        saveBtn = Ui.button(this, "Save this reading", Theme.LINE, Theme.INK);
+        saveBtn.setOnClickListener(v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            saveReading();
+        });
+        res.addView(saveBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
         shakePage.addView(res, Ui.gapBelow(this, 12));
 
         // Peaks card.
