@@ -30,10 +30,15 @@ jobs:
       - name: Unit tests
         run: ./gradlew --no-daemon testDebugUnitTest
 
-      - name: Build debug APK and compile UI tests
+      - name: Build APKs and compile UI tests
         run: |
-          ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
-          cp app/build/outputs/apk/debug/app-debug.apk LiveLingo-debug.apk
+          ./gradlew --no-daemon assembleCompact assembleDebug assembleDebugAndroidTest
+          cp app/build/outputs/apk/compact/app-compact.apk LiveLingo.apk
+          cp app/build/outputs/apk/debug/app-debug.apk LiveLingo-debug-full.apk
+
+      - name: Show R8 missing-class rules (if any)
+        if: failure()
+        run: cat app/build/outputs/mapping/compact/missing_rules.txt || true
 
       - name: Build release APK (only when signing secrets exist)
         env:
@@ -62,7 +67,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: LiveLingo-apk
-          path: LiveLingo-*.apk
+          path: LiveLingo*.apk
 
       - name: Publish as a release download
         uses: softprops/action-gh-release@v2
@@ -70,6 +75,7 @@ jobs:
           tag_name: livelingo-${{ github.run_number }}
           name: LiveLingo build ${{ github.run_number }}
           body: |
-            Download LiveLingo-debug.apk below and open it on your phone to install.
+            Install LiveLingo.apk (compact build) on your phone.
+            LiveLingo-debug-full.apk is the same app without code shrinking, kept as a fallback.
             Setup steps are in the README on the livelingo branch.
-          files: LiveLingo-*.apk
+          files: LiveLingo*.apk

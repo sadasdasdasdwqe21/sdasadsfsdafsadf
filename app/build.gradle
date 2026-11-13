@@ -17,6 +17,11 @@ android {
         versionCode 1
         versionName '0.1.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        // 64-bit ARM covers the Galaxy S25 Ultra and practically every Android 10+ phone.
+        // Leaving out x86/armv7 copies of ML Kit's native library saves about 45 MB.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
     }
 
     signingConfigs {
@@ -42,6 +47,14 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+        }
+        // The APK to install: debuggable like debug, but shrunk with R8 (unused icon and library
+        // code removed), so it is a fraction of the size.
+        compact {
+            initWith debug
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            matchingFallbacks = ['debug']
         }
         release {
             minifyEnabled true
