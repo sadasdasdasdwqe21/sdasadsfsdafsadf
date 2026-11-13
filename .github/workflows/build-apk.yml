@@ -1,0 +1,75 @@
+name: Build LiveLingo APK
+
+on:
+  push:
+    branches: [livelingo]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare SDK path
+        run: |
+          echo "Using preinstalled Android SDK at $ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Build debug APK and compile UI tests
+        run: |
+          ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
+          cp app/build/outputs/apk/debug/app-debug.apk LiveLingo-debug.apk
+
+      - name: Build release APK (only when signing secrets exist)
+        env:
+          KEYSTORE_B64: ${{ secrets.LIVELINGO_RELEASE_KEYSTORE_B64 }}
+          LIVELINGO_RELEASE_STORE_PASSWORD: ${{ secrets.LIVELINGO_RELEASE_STORE_PASSWORD }}
+          LIVELINGO_RELEASE_KEY_ALIAS: ${{ secrets.LIVELINGO_RELEASE_KEY_ALIAS }}
+          LIVELINGO_RELEASE_KEY_PASSWORD: ${{ secrets.LIVELINGO_RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export LIVELINGO_RELEASE_KEYSTORE="$RUNNER_TEMP/release.keystore"
+            ./gradlew --no-daemon assembleRelease
+            cp app/build/outputs/apk/release/app-release.apk LiveLingo-release.apk
+          else
+            echo "No release signing secrets configured, skipping release APK."
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveLingo-test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveLingo-apk
+          path: LiveLingo-*.apk
+
+      - name: Publish as a release download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: livelingo-${{ github.run_number }}
+          name: LiveLingo build ${{ github.run_number }}
+          body: |
+            Download LiveLingo-debug.apk below and open it on your phone to install.
+            Setup steps are in the README on the livelingo branch.
+          files: LiveLingo-*.apk

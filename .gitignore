@@ -1,0 +1,9 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+backend/cloudflare-worker/.wrangler/
+backend/cloudflare-worker/.dev.vars
