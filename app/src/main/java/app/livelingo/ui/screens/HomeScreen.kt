@@ -8,6 +8,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
@@ -94,6 +96,7 @@ fun HomeScreen(vm: MainViewModel, navigate: (String) -> Unit) {
     val setup by vm.setup.collectAsState()
     val captions by vm.captions.collectAsState()
     val context = LocalContext.current
+    val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.refreshSetup() }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -210,7 +213,7 @@ fun HomeScreen(vm: MainViewModel, navigate: (String) -> Unit) {
                     context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
                 }
                 CheckRow(Icons.Rounded.Mic, "Audio permission", "Needed to hear the video (internal audio or microphone)", setup.audio) {
-                    vm.start()
+                    audioPermission.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
                 CheckRow(Icons.Rounded.Key, "Speech engine", "Add your Soniox key or token server", setup.engineConfigured) { navigate("engine") }
                 CheckRow(Icons.Rounded.Notifications, "Notifications", "Shows status with Pause and Stop buttons", setup.notifications) {

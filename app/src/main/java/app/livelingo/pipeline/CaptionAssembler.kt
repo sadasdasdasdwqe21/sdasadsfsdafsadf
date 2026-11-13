@@ -37,7 +37,8 @@ class CaptionAssembler(
     private val pending = ArrayDeque<Pending>()
     private val uncommittedTranslation = StringBuilder()
 
-    private var lastActivityAt = 0L
+    /** -1 until something has been shown. */
+    private var lastActivityAt = -1L
     private var lastTranslationFinalAt = 0L
 
     var detectedLanguage: String? = null
@@ -51,7 +52,7 @@ class CaptionAssembler(
         origNeedsSeparator = false; transNeedsSeparator = false
         segmentOriginal.clear(); segmentLanguage = null
         pending.clear(); uncommittedTranslation.clear()
-        lastActivityAt = 0L; lastTranslationFinalAt = 0L
+        lastActivityAt = -1L; lastTranslationFinalAt = 0L
     }
 
     /**
@@ -153,7 +154,7 @@ class CaptionAssembler(
                 uncommittedTranslation.clear()
             }
         }
-        val idle = lastActivityAt > 0 && now - lastActivityAt >= clearAfterMs
+        val idle = lastActivityAt >= 0 && now - lastActivityAt >= clearAfterMs
         if (idle && origProvisional.isBlank() && transProvisional.isBlank() && (origFinal.isNotEmpty() || transFinal.isNotEmpty())) {
             origFinal.clear()
             transFinal.clear()
