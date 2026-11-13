@@ -118,7 +118,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateLanguage(block: (LanguagePreferences) -> LanguagePreferences) = viewModelScope.launch {
         c.settings.updateLanguage(block)
-        c.session.updateStatus { it.copy(targetLanguage = c.settings.current().language.targetLanguage) }
+        val target = c.settings.current().language.targetLanguage
+        c.session.updateStatus { it.copy(targetLanguage = target) }
         notifyEngineChanged()
     }
 
