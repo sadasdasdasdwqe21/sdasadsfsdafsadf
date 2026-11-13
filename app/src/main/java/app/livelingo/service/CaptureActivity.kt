@@ -13,6 +13,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import app.livelingo.container
 import app.livelingo.core.AppError
 import app.livelingo.core.AudioSourceType
@@ -64,15 +66,30 @@ class CaptureActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val requested = intent.getStringExtra(ServiceController.EXTRA_SOURCE)
-        source = if (requested != null) enumOr(requested, AudioSourceType.INTERNAL)
-        else container.settings.settings.value.audio.preferredSource
-
         if (savedInstanceState != null) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            afterAudioPermission()
-        } else {
-            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        // Read settings from disk: after a cold start (tile tapped) the in-memory copy may not be loaded yet.
+        lifecycleScope.launch {
+            val settings = container.settings.current()
+            val requested = intent.getStringExtra(ServiceController.EXTRA_SOURCE)
+            source = if (requested != null) enumOr(requested, AudioSourceType.INTERNAL) else settings.audio.preferredSource
+
+            // Don't ask for capture consent if the session could not translate anyway.
+            if (!alreadyRunning() && !container.engineReady(settings.engine)) {
+                report(AppError(ErrorKind.NOT_CONFIGURED, "Set up the speech engine first: add your Soniox API key or token server.", RecoveryAction.OPEN_ENGINE_SETTINGS))
+                startActivity(
+                    Intent(this@CaptureActivity, app.livelingo.ui.MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra(app.livelingo.ui.MainActivity.EXTRA_ROUTE, "engine")
+                )
+                finishQuietly()
+                return@launch
+            }
+
+            if (ContextCompat.checkSelfPermission(this@CaptureActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                afterAudioPermission()
+            } else {
+                audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 

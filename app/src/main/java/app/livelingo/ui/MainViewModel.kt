@@ -82,13 +82,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshSetup() {
         val pm = ctx.getSystemService(PowerManager::class.java)
         val engine = settings.value.engine
-        val configured = when (engine.speechEngine) {
-            SpeechEngine.ON_DEVICE -> OnDeviceSpeechProvider.isSupportedOnThisPhone(ctx)
-            SpeechEngine.SONIOX -> when (engine.credentialMode) {
-                CredentialMode.DEVICE_KEY -> c.secureStore.has(SecureStore.SONIOX_API_KEY)
-                CredentialMode.TOKEN_SERVER -> engine.tokenServerUrl.startsWith("https://")
-            }
-        }
+        val configured = c.engineReady(engine)
         _setup.value = SetupState(
             overlay = Settings.canDrawOverlays(ctx),
             audio = granted(Manifest.permission.RECORD_AUDIO),

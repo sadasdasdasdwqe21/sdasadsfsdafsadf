@@ -316,13 +316,13 @@ class TranslationPipeline(
 
                 val chunk = buffer.poll(100)
                 val now = SystemClock.elapsedRealtime()
-                if (chunk == null) {
-                    if (now - lastSendAt > 10_000) {
-                        p.keepAlive()
-                        lastSendAt = now
-                    }
-                    continue
+                // Silence is not streamed when gating is on, so keep the idle socket alive
+                // (Soniox closes connections that are quiet for 40 s).
+                if (now - lastSendAt > 10_000) {
+                    p.keepAlive()
+                    lastSendAt = now
                 }
+                if (chunk == null) continue
 
                 val v = vad.process(chunk.samples, chunk.durationMs)
                 silentMs = if (v.levelDb < -85f) silentMs + chunk.durationMs else 0

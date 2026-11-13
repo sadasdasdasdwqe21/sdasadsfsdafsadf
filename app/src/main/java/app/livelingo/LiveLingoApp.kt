@@ -77,6 +77,17 @@ class AppContainer(private val app: Application) {
         }
     }
 
+    /** True when the selected speech engine has what it needs to start (key, server or offline support). */
+    fun engineReady(e: app.livelingo.settings.EnginePreferences = settings.settings.value.engine): Boolean {
+        return when (e.speechEngine) {
+            SpeechEngine.ON_DEVICE -> OnDeviceSpeechProvider.isSupportedOnThisPhone(app)
+            SpeechEngine.SONIOX -> when (e.credentialMode) {
+                app.livelingo.settings.CredentialMode.DEVICE_KEY -> secureStore.has(SecureStore.SONIOX_API_KEY)
+                app.livelingo.settings.CredentialMode.TOKEN_SERVER -> e.tokenServerUrl.startsWith("https://")
+            }
+        }
+    }
+
     /** Engine registry: one place to add new speech engines. */
     fun createSpeechProvider(engine: SpeechEngine): SpeechRecognitionProvider = when (engine) {
         SpeechEngine.SONIOX -> SonioxSpeechProvider(http, credentials)
