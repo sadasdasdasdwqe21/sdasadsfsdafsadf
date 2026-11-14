@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.obdforge.core.ProtocolTest" tests="15" skipped="0" failures="0" errors="0" timestamp="2026-11-14T07:58:36" hostname="runnervmccnms" time="0.03">
+  <properties/>
+  <testcase name="isoTpSequenceErrorDetected" classname="app.obdforge.core.ProtocolTest" time="0.004"/>
+  <testcase name="isoTpSegmentAndReassemble" classname="app.obdforge.core.ProtocolTest" time="0.001"/>
+  <testcase name="parseCan11SingleFramesTwoEcus" classname="app.obdforge.core.ProtocolTest" time="0.005"/>
+  <testcase name="parseCan29" classname="app.obdforge.core.ProtocolTest" time="0.003"/>
+  <testcase name="parseHeadersOffMultiLine" classname="app.obdforge.core.ProtocolTest" time="0.002"/>
+  <testcase name="hexRoundTrip" classname="app.obdforge.core.ProtocolTest" time="0.004"/>
+  <testcase name="isoTpInterleavedEcus" classname="app.obdforge.core.ProtocolTest" time="0.001"/>
+  <testcase name="parseCan11NoSpaces" classname="app.obdforge.core.ProtocolTest" time="0.0"/>
+  <testcase name="parseLegacyIso9141" classname="app.obdforge.core.ProtocolTest" time="0.0"/>
+  <testcase name="elmErrorDetection" classname="app.obdforge.core.ProtocolTest" time="0.004"/>
+  <testcase name="corruptLinesCounted" classname="app.obdforge.core.ProtocolTest" time="0.0"/>
+  <testcase name="protocolFromDpn" classname="app.obdforge.core.ProtocolTest" time="0.0"/>
+  <testcase name="jsonRoundTrip" classname="app.obdforge.core.ProtocolTest" time="0.0"/>
+  <testcase name="flowControlParsing" classname="app.obdforge.core.ProtocolTest" time="0.001"/>
+  <testcase name="parseCanMultiFrameVin" classname="app.obdforge.core.ProtocolTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

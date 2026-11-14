@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.obdforge.core.DecodeTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-14T07:58:36" hostname="runnervmccnms" time="0.057">
+  <properties/>
+  <testcase name="standardPidFormulas" classname="app.obdforge.core.DecodeTest" time="0.001"/>
+  <testcase name="supportBitmap" classname="app.obdforge.core.DecodeTest" time="0.001"/>
+  <testcase name="textPids" classname="app.obdforge.core.DecodeTest" time="0.004"/>
+  <testcase name="mode06Decode" classname="app.obdforge.core.DecodeTest" time="0.02"/>
+  <testcase name="readinessDecode" classname="app.obdforge.core.DecodeTest" time="0.001"/>
+  <testcase name="expressions" classname="app.obdforge.core.DecodeTest" time="0.002"/>
+  <testcase name="dtcDecodeEncode" classname="app.obdforge.core.DecodeTest" time="0.01"/>
+  <testcase name="dtcClassificationAndDatabase" classname="app.obdforge.core.DecodeTest" time="0.001"/>
+  <testcase name="profileRoundTrip" classname="app.obdforge.core.DecodeTest" time="0.013"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,264 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :obd-core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :obd-core:processResources NO-SOURCE
+> Task :obd-core:processTestResources NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResValues
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:javaPreCompileDebug
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:processDebugResources
+> Task :obd-core:compileKotlin
+> Task :obd-core:compileJava NO-SOURCE
+> Task :obd-core:classes UP-TO-DATE
+> Task :obd-core:jar
+> Task :obd-core:compileTestKotlin
+> Task :obd-core:compileTestJava NO-SOURCE
+> Task :obd-core:testClasses UP-TO-DATE
+> Task :obd-core:test
+> Task :app:kspDebugKotlin
+
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/java/app/obdforge/ui/AppRoot.kt:78:42 'val Icons.Filled.List: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.List.
+w: file:///home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/java/app/obdforge/ui/screens/HomeScreen.kt:184:50 'val Icons.Filled.ShowChart: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ShowChart.
+w: file:///home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/java/app/obdforge/ui/screens/ManageScreens.kt:100:53 'val Icons.Filled.MenuBook: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.MenuBook.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1794643058873.json
+
+BUILD SUCCESSFUL in 1m 41s
+30 actionable tasks: 30 executed
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:buildKotlinToolingMetadata
+> Task :obd-core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :obd-core:compileKotlin UP-TO-DATE
+> Task :obd-core:compileJava NO-SOURCE
+> Task :obd-core:processResources NO-SOURCE
+> Task :obd-core:classes UP-TO-DATE
+> Task :obd-core:jar UP-TO-DATE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preCompactBuild UP-TO-DATE
+> Task :app:generateCompactBuildConfig
+> Task :app:generateCompactResValues
+> Task :app:checkCompactAarMetadata
+> Task :app:mapCompactSourceSetPaths
+> Task :app:generateCompactResources
+> Task :app:packageCompactResources
+> Task :app:createCompactCompatibleScreenManifests
+> Task :app:extractDeepLinksCompact
+> Task :app:parseCompactLocalResources
+> Task :app:mergeCompactResources
+> Task :app:processCompactMainManifest
+> Task :app:processCompactManifest
+> Task :app:processCompactManifestForPackage
+> Task :app:javaPreCompileCompact
+> Task :app:extractProguardFiles
+> Task :app:mergeCompactJniLibFolders
+> Task :app:mergeCompactNativeLibs
+> Task :app:processCompactResources
+> Task :app:checkCompactDuplicateClasses
+
+> Task :app:stripCompactDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so.
+
+> Task :app:mergeCompactArtProfile
+> Task :app:mergeCompactStartupProfile
+> Task :app:extractCompactNativeSymbolTables
+> Task :app:mergeCompactShaders
+> Task :app:mergeCompactNativeDebugMetadata NO-SOURCE
+> Task :app:compileCompactShaders NO-SOURCE
+> Task :app:generateCompactAssets UP-TO-DATE
+> Task :app:mergeCompactAssets
+> Task :app:compressCompactAssets
+> Task :app:extractCompactVersionControlInfo
+> Task :app:processApplicationManifestCompactForBundle
+> Task :app:bundleCompactResources
+> Task :app:collectCompactDependencies
+> Task :app:sdkCompactDependencyData
+> Task :app:validateSigningCompact
+> Task :app:writeCompactAppMetadata
+> Task :app:writeCompactSigningConfigVersions
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:kspDebugKotlin UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets
+> Task :app:desugarDebugFileDependencies
+> Task :app:kspCompactKotlin
+> Task :app:dexBuilderDebug
+> Task :app:compileCompactKotlin
+> Task :app:mergeDebugGlobalSynthetics
+
+> Task :app:compileCompactKotlin
+w: file:///home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/java/app/obdforge/ui/AppRoot.kt:78:42 'val Icons.Filled.List: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.List.
+w: file:///home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/java/app/obdforge/ui/screens/HomeScreen.kt:184:50 'val Icons.Filled.ShowChart: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ShowChart.
+w: file:///home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/java/app/obdforge/ui/screens/ManageScreens.kt:100:53 'val Icons.Filled.MenuBook: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.MenuBook.
+
+> Task :app:compileCompactJavaWithJavac
+> Task :app:generateCompactLintVitalReportModel
+> Task :app:mergeCompactGeneratedProguardFiles
+> Task :app:processCompactJavaRes
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:expandCompactArtProfileWildcards
+> Task :app:mergeCompactJavaResource
+> Task :app:mergeDebugJavaResource
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugStartupProfile
+> Task :app:mergeLibDexDebug
+> Task :app:mergeExtDexDebug
+> Task :app:mergeDebugJniLibFolders
+> Task :app:mergeProjectDexDebug
+> Task :app:validateSigningDebug
+> Task :app:mergeDebugNativeLibs
+> Task :app:writeDebugAppMetadata
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so.
+
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:processDebugAndroidTestManifest
+> Task :app:generateDebugAndroidTestBuildConfig
+> Task :app:checkDebugAndroidTestAarMetadata
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:generateDebugAndroidTestResValues
+> Task :app:mapDebugAndroidTestSourceSetPaths
+> Task :app:generateDebugAndroidTestResources
+> Task :app:javaPreCompileDebugAndroidTest
+> Task :app:mergeDebugAndroidTestShaders
+> Task :app:compileDebugAndroidTestShaders NO-SOURCE
+> Task :app:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :app:mergeDebugAndroidTestResources
+> Task :app:mergeDebugAndroidTestAssets
+> Task :app:compressDebugAndroidTestAssets
+> Task :app:desugarDebugAndroidTestFileDependencies
+> Task :app:processDebugAndroidTestResources
+> Task :app:checkDebugAndroidTestDuplicateClasses
+> Task :app:lintVitalAnalyzeCompact
+> Task :app:kspDebugAndroidTestKotlin
+> Task :app:mergeExtDexDebugAndroidTest
+> Task :app:mergeLibDexDebugAndroidTest
+> Task :app:mergeDebugAndroidTestJniLibFolders
+> Task :app:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebugAndroidTest
+> Task :app:writeDebugAndroidTestSigningConfigVersions
+> Task :app:compileDebugAndroidTestKotlin
+> Task :app:compileDebugAndroidTestJavaWithJavac
+> Task :app:dexBuilderDebugAndroidTest
+> Task :app:minifyCompactWithR8
+> Task :app:mergeDebugAndroidTestGlobalSynthetics
+> Task :app:processDebugAndroidTestJavaRes
+> Task :app:mergeProjectDexDebugAndroidTest
+> Task :app:mergeDebugAndroidTestJavaResource
+> Task :app:packageDebugAndroidTest
+> Task :app:createDebugAndroidTestApkListingFileRedirect
+> Task :app:assembleDebugAndroidTest
+> Task :app:lintVitalReportCompact
+
+> Task :app:lintVitalCompact FAILED
+/home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/res/xml/backup_rules.xml:5: Error: secrets.xml is not in an included path [FullBackupContent]
+    <exclude domain="sharedpref" path="secrets.xml" />
+                                       ~~~~~~~~~~~
+/home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/res/xml/data_extraction_rules.xml:6: Error: secrets.xml is not in an included path [FullBackupContent]
+        <exclude domain="sharedpref" path="secrets.xml" />
+                                           ~~~~~~~~~~~
+
+   Explanation for issues of type "FullBackupContent":
+   Ensures that <data-extraction-rules> and <full-backup-content> files, which
+   configure backup options, are valid.
+
+   https://android-developers.googleblog.com/2015/07/auto-backup-for-apps-made-simple.html
+
+2 errors, 0 warnings
+
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1794643159102.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:lintVitalCompact'.
+> Lint found fatal errors while assembling a release target.
+  
+  Fix the issues identified by lint, or create a baseline to see only new errors.
+  To create a baseline, run `gradlew updateLintBaseline` after adding the following to the module's build.gradle file:
+  ```
+  android {
+      lint {
+          baseline = file("lint-baseline.xml")
+      }
+  }
+  ```
+  For more details, see https://developer.android.com/studio/write/lint#snapshot
+  
+  /home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/res/xml/backup_rules.xml:5: Error: secrets.xml is not in an included path [FullBackupContent]
+      <exclude domain="sharedpref" path="secrets.xml" />
+                                         ~~~~~~~~~~~
+  /home/runner/work/sdasadsfsdafsadf/sdasadsfsdafsadf/app/src/main/res/xml/data_extraction_rules.xml:6: Error: secrets.xml is not in an included path [FullBackupContent]
+          <exclude domain="sharedpref" path="secrets.xml" />
+                                             ~~~~~~~~~~~
+  
+     Explanation for issues of type "FullBackupContent":
+     Ensures that <data-extraction-rules> and <full-backup-content> files, which
+     configure backup options, are valid.
+  
+     https://android-developers.googleblog.com/2015/07/auto-backup-for-apps-made-simple.html
+  
+  2 errors, 0 warnings
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 3m 59s
+118 actionable tasks: 96 executed, 22 up-to-date

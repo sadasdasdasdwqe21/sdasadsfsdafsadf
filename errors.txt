@@ -1,0 +1,3 @@
+207:> Task :app:lintVitalCompact FAILED
+227:* What went wrong:
+263:BUILD FAILED in 3m 59s

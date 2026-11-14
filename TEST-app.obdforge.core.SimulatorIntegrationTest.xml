@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.obdforge.core.SimulatorIntegrationTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-14T07:58:36" hostname="runnervmccnms" time="3.053">
+  <properties/>
+  <testcase name="readLivePidsMultiRequest" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.207"/>
+  <testcase name="dtcFreezeFrameAndClear" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.378"/>
+  <testcase name="udsEnhancedReads" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.188"/>
+  <testcase name="commandPriorityThroughExecutor" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.157"/>
+  <testcase name="commFailureScenarioRecoversWithRetries" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.792"/>
+  <testcase name="forcedWrongProtocolFallsThroughToError" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.027"/>
+  <testcase name="livePollerAndDerived" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.175"/>
+  <testcase name="linkDropSurfacesAsTransportException" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.284"/>
+  <testcase name="connectCanDiscoversEverything" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.133"/>
+  <testcase name="mode06AndMode09" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.356"/>
+  <testcase name="legacyIso9141" classname="app.obdforge.core.SimulatorIntegrationTest" time="0.355"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

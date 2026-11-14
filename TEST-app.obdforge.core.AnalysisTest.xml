@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.obdforge.core.AnalysisTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-14T07:58:35" hostname="runnervmccnms" time="0.424">
+  <properties/>
+  <testcase name="performanceQuarterMileAndAbort" classname="app.obdforge.core.AnalysisTest" time="0.017"/>
+  <testcase name="performanceTimer0to100" classname="app.obdforge.core.AnalysisTest" time="0.007"/>
+  <testcase name="normalScenarioIsQuiet" classname="app.obdforge.core.AnalysisTest" time="0.049"/>
+  <testcase name="assistantRichExampleFromSpec" classname="app.obdforge.core.AnalysisTest" time="0.059"/>
+  <testcase name="exportsCsvJsonXlsx" classname="app.obdforge.core.AnalysisTest" time="0.104"/>
+  <testcase name="alertsSustainAndCooldown" classname="app.obdforge.core.AnalysisTest" time="0.018"/>
+  <testcase name="assistantLeanSeparatesLeakFromFuelDelivery" classname="app.obdforge.core.AnalysisTest" time="0.026"/>
+  <testcase name="queryEngineAnswers" classname="app.obdforge.core.AnalysisTest" time="0.014"/>
+  <testcase name="coolingWarmupAndOverheat" classname="app.obdforge.core.AnalysisTest" time="0.052"/>
+  <testcase name="statsBasics" classname="app.obdforge.core.AnalysisTest" time="0.0"/>
+  <testcase name="richScenarioTrimAnalysis" classname="app.obdforge.core.AnalysisTest" time="0.024"/>
+  <testcase name="leanVacuumLeakPattern" classname="app.obdforge.core.AnalysisTest" time="0.015"/>
+  <testcase name="assistantUsesUserTestResults" classname="app.obdforge.core.AnalysisTest" time="0.003"/>
+  <testcase name="boostAnalysisDetectsUnderboost" classname="app.obdforge.core.AnalysisTest" time="0.036"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

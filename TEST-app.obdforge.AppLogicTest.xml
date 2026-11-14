@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="app.obdforge.AppLogicTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-14T07:59:15" hostname="runnervmccnms" time="0.07">
+  <properties/>
+  <testcase name="unitConversions" classname="app.obdforge.AppLogicTest" time="0.048"/>
+  <testcase name="terminalBlocksStateChangingCommands" classname="app.obdforge.AppLogicTest" time="0.013"/>
+  <testcase name="dashboardRoundTripAndPresets" classname="app.obdforge.AppLogicTest" time="0.008"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
