@@ -76,6 +76,6 @@ class AppEndToEndTest {
         rule.onNodeWithText("Logs").performClick()
         rule.waitUntil(10_000) { rule.onAllNodesWithText("Recordings").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("More").performClick()
-        rule.waitUntil(10_000) { rule.onAllNodesWithText("Settings").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(10_000) { rule.onAllNodesWithText("Connect adapter").fetchSemanticsNodes().isNotEmpty() }
     }
 }
