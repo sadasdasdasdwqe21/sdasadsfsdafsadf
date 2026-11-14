@@ -174,13 +174,13 @@ class PdfReport(private val title: String) {
 
             r.heading("Trouble codes")
             if (diag.readAt == null) r.para("Codes were not read in this session.")
-            else if (diag.allCodes.isEmpty()) r.para("No stored, pending or permanent codes (read ${date(diag.readAt)}).", green)
+            else if (diag.allCodes.isEmpty()) r.para("No stored, pending or permanent codes (read ${date(diag.readAt)}).", r.green)
             for (d in diag.allCodes.distinctBy { it.code + it.kind }) {
                 val info = DtcKnowledge.info(d.code.take(5), vehicle?.make)
-                r.para("${d.code}  ${info.description}", bold)
-                r.para("${d.kind.label} · ${info.system} · Severity: ${info.severity.label}", small, 10f)
-                if (info.possibleCauses.isNotEmpty()) r.para("Possible causes (not confirmed): " + info.possibleCauses.take(5).joinToString("; "), body, 10f)
-                if (info.diagnosticSteps.isNotEmpty()) r.para("First checks: " + info.diagnosticSteps.take(3).joinToString(" "), body, 10f)
+                r.para("${d.code}  ${info.description}", r.bold)
+                r.para("${d.kind.label} · ${info.system} · Severity: ${info.severity.label}", r.small, 10f)
+                if (info.possibleCauses.isNotEmpty()) r.para("Possible causes (not confirmed): " + info.possibleCauses.take(5).joinToString("; "), r.body, 10f)
+                if (info.diagnosticSteps.isNotEmpty()) r.para("First checks: " + info.diagnosticSteps.take(3).joinToString(" "), r.body, 10f)
                 r.spacer(4f)
             }
             diag.readiness?.let { st ->
@@ -204,24 +204,24 @@ class PdfReport(private val title: String) {
             if (findings.isNotEmpty()) {
                 r.heading("Engine analysis")
                 for (f in findings.filter { it.level != Level.OK || it.section == "Fuel trims" }) {
-                    r.para("[${f.level.label}] ${f.section}: ${f.title}" + if (f.estimated) " (estimate)" else "", when (f.level) { Level.ALERT -> red; Level.WARN -> amber; else -> bold })
-                    if (f.detail.isNotBlank()) r.para(f.detail, body, 10f)
+                    r.para("[${f.level.label}] ${f.section}: ${f.title}" + if (f.estimated) " (estimate)" else "", when (f.level) { Level.ALERT -> r.red; Level.WARN -> r.amber; else -> r.bold })
+                    if (f.detail.isNotBlank()) r.para(f.detail, r.body, 10f)
                 }
             }
             assistant?.let { a ->
                 r.heading("Diagnostic assistant (hypotheses, not confirmed faults)")
-                r.para(a.headline, bold)
+                r.para(a.headline, r.bold)
                 a.conditions.forEach { r.para("• $it") }
                 a.hypotheses.take(5).forEach { h ->
-                    r.para("${h.title} — ${h.strength}", bold)
-                    if (h.evidenceFor.isNotEmpty()) r.para("For: " + h.evidenceFor.joinToString("; "), body, 10f)
-                    if (h.evidenceAgainst.isNotEmpty()) r.para("Against: " + h.evidenceAgainst.joinToString("; "), body, 10f)
+                    r.para("${h.title} — ${h.strength}", r.bold)
+                    if (h.evidenceFor.isNotEmpty()) r.para("For: " + h.evidenceFor.joinToString("; "), r.body, 10f)
+                    if (h.evidenceAgainst.isNotEmpty()) r.para("Against: " + h.evidenceAgainst.joinToString("; "), r.body, 10f)
                 }
                 if (a.testPlan.isNotEmpty()) {
-                    r.para("Suggested test order:", bold)
-                    a.testPlan.take(6).forEachIndexed { i, (h, t) -> r.para("${i + 1}. ${t.action} (supports \"$h\" if: ${t.confirmsIf}; rules it out if: ${t.eliminatesIf})", body, 10f) }
+                    r.para("Suggested test order:", r.bold)
+                    a.testPlan.take(6).forEachIndexed { i, (h, t) -> r.para("${i + 1}. ${t.action} (supports \"$h\" if: ${t.confirmsIf}; rules it out if: ${t.eliminatesIf})", r.body, 10f) }
                 }
-                r.para(a.disclaimer, small)
+                r.para(a.disclaimer, r.small)
             }
             val f = File(Share.exportDir(ctx), "OBDForge_report_${SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())}.pdf")
             r.writeTo(f)
@@ -243,7 +243,7 @@ class PdfReport(private val title: String) {
             for (g in groups) { val ss = g.mapNotNull { data[it] }; if (ss.isNotEmpty()) r.chart(ss) }
             if (findings.isNotEmpty()) {
                 r.heading("Analysis")
-                findings.forEach { f -> r.para("[${f.level.label}] ${f.title}" + if (f.estimated) " (estimate)" else "", bold); if (f.detail.isNotBlank()) r.para(f.detail, Paint().apply { textSize = 9f }, 10f) }
+                findings.forEach { f -> r.para("[${f.level.label}] ${f.title}" + if (f.estimated) " (estimate)" else "", r.bold); if (f.detail.isNotBlank()) r.para(f.detail, Paint().apply { textSize = 9f }, 10f) }
             }
             val f = File(Share.exportDir(ctx), "OBDForge_${Share.safeName(title)}.pdf")
             r.writeTo(f)
