@@ -103,6 +103,18 @@ jobs:
           target: default
           disable-animations: true
           script: echo "sdk.dir=$ANDROID_HOME" > local.properties && chmod +x gradlew && ./gradlew --no-daemon connectedDebugAndroidTest
+      - name: Publish UI test failure details
+        if: failure()
+        run: |
+          mkdir -p /tmp/uilog
+          find app/build -path "*androidTest-results*" -name "*.xml" -exec cp {} /tmp/uilog/ \; 2>/dev/null || true
+          find app/build -path "*androidTest-results*" -name "logcat*" -exec cp {} /tmp/uilog/ \; 2>/dev/null || true
+          cd /tmp/uilog
+          git init -q
+          git checkout -q -b obd-forge-ui-log
+          git add . || true
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "UI test log run ${{ github.run_number }}" --allow-empty
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" obd-forge-ui-log
       - name: Upload UI test report
         if: always()
         uses: actions/upload-artifact@v4
