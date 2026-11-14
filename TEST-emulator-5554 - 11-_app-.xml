@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuite name="app.obdforge.AppEndToEndTest" tests="6" failures="1" errors="0" skipped="0" time="24.272" timestamp="2026-11-14T08:27:09" hostname="localhost">
+  <properties>
+    <property name="device" value="emulator-5554 - 11" />
+    <property name="flavor" value="" />
+    <property name="project" value=":app" />
+  </properties>
+  <testcase name="connectReadCodesAndRecord" classname="app.obdforge.AppEndToEndTest" time="6.309" />
+  <testcase name="navigateMainScreens" classname="app.obdforge.AppEndToEndTest" time="12.468">
+    <failure>androidx.compose.ui.test.ComposeTimeoutException: Condition still not satisfied after 10000 ms
+at androidx.compose.ui.test.AndroidComposeUiTestEnvironment$AndroidComposeUiTestImpl.waitUntil(ComposeUiTest.android.kt:441)
+at androidx.compose.ui.test.junit4.AndroidComposeTestRule.waitUntil(AndroidComposeTestRule.android.kt:306)
+at app.obdforge.AppEndToEndTest.navigateMainScreens(AppEndToEndTest.kt:79)
+</failure>
+  </testcase>
+  <testcase name="reconnectsAfterLinkDrop" classname="app.obdforge.AppEndToEndTest" time="3.671" />
+  <testcase name="digitalGaugeShowsValueAndStats" classname="app.obdforge.GaugeUiTest" time="0.228" />
+  <testcase name="clearCodesNeedsAcknowledgement" classname="app.obdforge.GaugeUiTest" time="0.535" />
+  <testcase name="unsupportedGaugeSaysSo" classname="app.obdforge.GaugeUiTest" time="0.153" />
+</testsuite>

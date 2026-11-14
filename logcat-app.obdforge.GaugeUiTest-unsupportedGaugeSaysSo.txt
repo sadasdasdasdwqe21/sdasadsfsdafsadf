@@ -1,0 +1,101 @@
+11-14 08:27:09.007  2375  2395 I TestRunner: started: unsupportedGaugeSaysSo(app.obdforge.GaugeUiTest)
+11-14 08:27:09.009  2375  2395 D IdlingRegistry: Registering idling resources: [androidx.compose.ui.test.EspressoLink@694dc1c]
+11-14 08:27:09.009   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ffd35000 0x3ffdfd000]
+11-14 08:27:09.011   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ffad9000 0x3ffba1000]
+11-14 08:27:09.012  2375  2395 W Settings: Setting always_finish_activities has moved from android.provider.Settings.System to android.provider.Settings.Global, returning read-only value.
+11-14 08:27:09.014   502   536 D EventSequenceValidator: inc AccIntentStartedEvents to 2
+11-14 08:27:09.015   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ffba1000 0x3ffc69000]
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.019   502   946 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.026  2375  2375 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@53a1123 in: PRE_ON_CREATE
+11-14 08:27:09.026  2375  2375 V ActivityScenario: Activity lifecycle changed event received but ignored because the reported transition was not ON_CREATE while the last known transition was PRE_ON_CREATE
+11-14 08:27:09.028  2375  2375 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@53a1123 in: CREATED
+11-14 08:27:09.028  2375  2375 V ActivityScenario: Update currentActivityStage to CREATED, currentActivity=androidx.activity.ComponentActivity@53a1123
+11-14 08:27:09.030  2375  2375 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@53a1123 in: STARTED
+11-14 08:27:09.030  2375  2375 V ActivityScenario: Update currentActivityStage to STARTED, currentActivity=androidx.activity.ComponentActivity@53a1123
+11-14 08:27:09.030  2375  2375 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@53a1123 in: RESUMED
+11-14 08:27:09.030  2375  2375 V ActivityScenario: Update currentActivityStage to RESUMED, currentActivity=androidx.activity.ComponentActivity@53a1123
+11-14 08:27:09.046   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3fee59000 0x3fef21000]
+11-14 08:27:09.051   700   727 I ndroid.systemu: NativeAlloc concurrent copying GC freed 145969(7460KB) AllocSpace objects, 47(1068KB) LOS objects, 49% free, 7240KB/14MB, paused 13us total 143.826ms
+11-14 08:27:09.064   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3fef21000 0x3fefe9000]
+11-14 08:27:09.065   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3fefe9000 0x3ff0b1000]
+11-14 08:27:09.067   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ff0b1000 0x3ff179000]
+11-14 08:27:09.072   502   541 D ArtManagerInternalImpl: /data/misc/iorapd/app.obdforge/1/androidx.activity.ComponentActivity/compiled_traces/compiled_trace.pb doesn't exist
+11-14 08:27:09.073   502   541 I ActivityTaskManager: Displayed app.obdforge/androidx.activity.ComponentActivity: +56ms
+11-14 08:27:09.075   502   536 D EventSequenceValidator: dec AccIntentStartedEvents to 1
+11-14 08:27:09.124   502   536 D EventSequenceValidator: inc AccIntentStartedEvents to 2
+11-14 08:27:09.125   407   407 I perfetto: ing_service_impl.cc:758 Configured tracing session 10, #sources:1, duration:5000 ms, #buffers:1, total buffer size:4096 KB, total sessions:5, uid:1071 session name: ""
+11-14 08:27:09.125   405   405 I perfetto: probes_producer.cc:230  Ftrace setup (target_buf=10)
+11-14 08:27:09.128  2375  2375 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@53a1123 in: PAUSED
+11-14 08:27:09.128  2375  2375 V ActivityScenario: Update currentActivityStage to PAUSED, currentActivity=androidx.activity.ComponentActivity@53a1123
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.128   502   530 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.129   502   530 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.140   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3fee59000 0x3fef21000]
+11-14 08:27:09.145   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ff6f1000 0x3ff7b9000]
+11-14 08:27:09.160   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3fef21000 0x3fefe9000]
+11-14 08:27:09.161  2375  2375 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@53a1123 in: STOPPED
+11-14 08:27:09.161  2375  2375 V ActivityScenario: Update currentActivityStage to STOPPED, currentActivity=androidx.activity.ComponentActivity@53a1123
+11-14 08:27:09.163  2375  2375 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@53a1123 in: DESTROYED
+11-14 08:27:09.163  2375  2375 V ActivityScenario: Update currentActivityStage to DESTROYED, currentActivity=null
+11-14 08:27:09.164   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ffad9000 0x3ffba1000]
+11-14 08:27:09.165   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ffba1000 0x3ffc69000]
+11-14 08:27:09.166   299   330 D goldfish-address-space: claimShared: Ask to claim region [0x3ffc69000 0x3ffd31000]
+11-14 08:27:09.173   502   536 D EventSequenceValidator: dec AccIntentStartedEvents to 1
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.175   502   530 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+11-14 08:27:09.177  2375  2395 D IdlingRegistry: Unregistering idling resources: [androidx.compose.ui.test.EspressoLink@694dc1c]
+11-14 08:27:09.177  2375  2395 I TestRunner: finished: unsupportedGaugeSaysSo(app.obdforge.GaugeUiTest)
