@@ -1,0 +1,112 @@
+name: Build OBD Forge APK
+
+on:
+  push:
+    branches: [obd-forge]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare SDK path
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+
+      - name: Unit tests (core engine + app logic)
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon :obd-core:test :app:testDebugUnitTest 2>&1 | tee -a build.log
+
+      - name: Build APKs and compile UI tests
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon assembleCompact assembleDebug assembleDebugAndroidTest 2>&1 | tee -a build.log
+          cp app/build/outputs/apk/compact/app-compact.apk OBDForge.apk
+          cp app/build/outputs/apk/debug/app-debug.apk OBDForge-debug-full.apk
+
+      - name: Publish failure log (for diagnosis)
+        if: failure()
+        run: |
+          mkdir -p /tmp/cilog
+          grep -nE "^e: |error:|FAILED|What went wrong|Exception|expected|Caused by" build.log | head -400 > /tmp/cilog/errors.txt || true
+          cp build.log /tmp/cilog/build.log || true
+          find . -path "*build/test-results*" -name "*.xml" -exec cp {} /tmp/cilog/ \; 2>/dev/null || true
+          cd /tmp/cilog
+          git init -q
+          git checkout -q -b obd-forge-ci-log
+          git add .
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "CI log run ${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" obd-forge-ci-log
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OBDForge-test-reports
+          path: |
+            obd-core/build/reports/tests/
+            app/build/reports/tests/
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OBDForge-apk
+          path: OBDForge*.apk
+
+      - name: Publish as a release download
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: obd-forge-${{ github.run_number }}
+          name: OBD Forge build ${{ github.run_number }}
+          body: |
+            Install OBDForge.apk on your phone (shrunk build, about a third of the size).
+            OBDForge-debug-full.apk is the same app without code shrinking, kept as a fallback.
+            Setup steps and the feature list are in the README on the obd-forge branch.
+          files: OBDForge*.apk
+
+  ui-tests:
+    # Instrumented Compose tests on an emulator. Informational: a flaky emulator does not block the APK.
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run UI tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: echo "sdk.dir=$ANDROID_HOME" > local.properties && chmod +x gradlew && ./gradlew --no-daemon connectedDebugAndroidTest
+      - name: Upload UI test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OBDForge-ui-test-report
+          path: app/build/reports/androidTests/
+          if-no-files-found: ignore

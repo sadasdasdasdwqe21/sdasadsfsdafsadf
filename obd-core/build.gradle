@@ -1,0 +1,29 @@
+// Pure Kotlin/JVM module: everything that talks the OBD-II protocol, decodes data,
+// analyses it, or simulates a car lives here, so it can be unit-tested on any JVM
+// without an Android device.
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    testLogging {
+        events "failed"
+        exceptionFormat "full"
+        showStandardStreams = false
+    }
+}
