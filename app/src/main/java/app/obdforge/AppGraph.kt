@@ -82,11 +82,11 @@ class AppGraph(val context: Context) {
         }
         // Keep the process alive in the background while connected; match the vehicle by VIN.
         scope.launch {
+            var active = false
             connection.state.collect { st ->
-                when (st) {
-                    is LinkState.Connecting, is LinkState.Connected, is LinkState.Reconnecting -> ObdService.start(context)
-                    else -> Unit
-                }
+                val wantService = st is LinkState.Connecting || st is LinkState.Connected || st is LinkState.Reconnecting
+                if (wantService && !active) ObdService.start(context)
+                active = wantService
                 if (st is LinkState.Connected) launch(Dispatchers.IO) { associateVehicle(st) }
             }
         }

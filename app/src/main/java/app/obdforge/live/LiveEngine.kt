@@ -82,6 +82,8 @@ class LiveEngine(
     private var job: Job? = null
     private var poller: LivePoller? = null
     private var pollerReportId: Any? = null
+    /** null = not tried yet on this connection; false = the ECU has no Mode 06 misfire data. */
+    @Volatile private var misfireSupported: Boolean? = null
 
     init {
         scope.launch {
@@ -134,6 +136,8 @@ class LiveEngine(
                 poller = conn.session?.let { LivePoller(it.client, report.supportedPids) }
                 pollerReportId = report
                 lastSelection = emptyMap()
+                misfireSupported = if (report.protocol.isCan) null else false
+                misfireMids = null
             }
             val p = poller ?: run { delay(200); null } ?: continue
             val keys = wanted()
@@ -148,9 +152,11 @@ class LiveEngine(
                     lastVolt = now
                     conn.run(Priority.LOW) { it.elm.readVoltage() }?.let { samples.add(Sample("adapter_voltage", it, System.currentTimeMillis())) }
                 }
-                if (keys.any { it.startsWith("misfire_") } && now - lastMisfire > 4000) {
+                if (misfireSupported != false && keys.any { it.startsWith("misfire_") } && now - lastMisfire > 4000) {
                     lastMisfire = now
-                    samples.addAll(readMisfires())
+                    val m = readMisfires()
+                    if (misfireSupported == null) misfireSupported = m.isNotEmpty()
+                    samples.addAll(m)
                 }
                 val enh = enhanced.filter { it.key in keys }
                 if (enh.isNotEmpty() && now - lastEnh > 1000) {
@@ -178,10 +184,16 @@ class LiveEngine(
         }
     }
 
+    @Volatile private var misfireMids: List<Int>? = null
+
+    /** Reads the Mode 06 per-cylinder misfire monitors the ECU says it supports (bitmap 06 A0). */
     private suspend fun readMisfires(): List<Sample> {
-        val res = conn.run(Priority.LOW) { c ->
-            (0xA2..0xA9).flatMap { mid -> c.request(0x06, mid).positive.values.flatten().flatMap { Mode06.decodeCan(it) } }
-        }
+        val mids = misfireMids ?: conn.run(Priority.LOW) { c ->
+            val p = c.request(0x06, 0xA0).positive.values.flatten().firstOrNull { it.size >= 5 && it[0] == 0xA0 }
+            if (p == null) emptyList() else app.obdforge.core.pid.Pids.decodeSupport(0xA0, p.copyOfRange(1, 5)).filter { Mode06.isMisfireCylinder(it) }.sorted()
+        }.also { misfireMids = it }
+        if (mids.isEmpty()) return emptyList()
+        val res = conn.run(Priority.LOW) { c -> mids.flatMap { mid -> c.request(0x06, mid).positive.values.flatten().flatMap { Mode06.decodeCan(it) } } }
         val t = System.currentTimeMillis()
         val byCyl = res.filter { Mode06.isMisfireCylinder(it.mid) }.groupBy { it.mid - 0xA1 }.mapValues { e -> e.value.maxOf { it.value } }
         if (byCyl.isEmpty()) return emptyList()

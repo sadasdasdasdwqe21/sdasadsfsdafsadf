@@ -22,6 +22,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -32,6 +34,9 @@ import kotlinx.coroutines.launch
 class ObdService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var wakeLock: PowerManager.WakeLock? = null
+    private var lastText = "Starting…"
+    private var lastSub: String? = null
+    private val fgsType get() = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
 
     companion object {
         const val CHANNEL = "link"
@@ -51,9 +56,8 @@ class ObdService : Service() {
         super.onCreate()
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel(CHANNEL, "Adapter connection", NotificationManager.IMPORTANCE_LOW))
-        val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
         try {
-            ServiceCompat.startForeground(this, ID, build("Starting…", null), type)
+            ServiceCompat.startForeground(this, ID, build(lastText, null), fgsType)
         } catch (e: Exception) {
             stopSelf(); return
         }
@@ -62,21 +66,23 @@ class ObdService : Service() {
         }
         val g = (application as ObdForgeApp).graph
         scope.launch {
-            combine(g.connection.state, g.recorder.state) { link, rec -> link to rec }.collect { (link, rec) ->
+            combine(g.connection.state, g.recorder.state.map { it?.title }.distinctUntilChanged()) { link, rec -> link to rec }.collect { (link, rec) ->
                 val text = when (link) {
-                    is LinkState.Connected -> "Connected · ${link.target.label}" + if (rec != null) " · Recording ${rec.samples} samples" else ""
+                    is LinkState.Connected -> "Connected · ${link.target.label}" + if (rec != null) " · Recording" else ""
                     is LinkState.Reconnecting -> "Reconnecting (attempt ${link.attempt})…"
                     is LinkState.Connecting -> link.step
                     is LinkState.Failed -> "Connection failed"
                     LinkState.Idle -> "Not connected"
                 }
-                nm.notify(ID, build(text, rec?.title))
+                if (text != lastText || rec != lastSub) { lastText = text; lastSub = rec; nm.notify(ID, build(text, rec)) }
                 if (link is LinkState.Idle || link is LinkState.Failed) if (rec == null) stopSelf()
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every startForegroundService() call must be answered with startForeground().
+        runCatching { ServiceCompat.startForeground(this, ID, build(lastText, lastSub), fgsType) }
         if (intent?.action == ACTION_STOP) {
             val g = (application as ObdForgeApp).graph
             scope.launch { g.recorder.stop(); g.connection.disconnect(); stopSelf() }
